@@ -12,6 +12,8 @@ on:
       - AGENTS_COMMON.md
       - consumers.txt
       - scripts/apply-common.mjs
+      - scripts/apply-shared.mjs
+      - shared/**
       - .github/workflows/sync.yml
   workflow_dispatch:
 
@@ -51,6 +53,9 @@ jobs:
 
       - name: Apply common block to consumer AGENTS.md
         run: node ai-ops/scripts/apply-common.mjs ai-ops/AGENTS_COMMON.md consumer/AGENTS.md
+
+      - name: Apply shared files to consumer (composite actions 等の共通インフラ)
+        run: node ai-ops/scripts/apply-shared.mjs ai-ops/shared consumer
 
       - name: Create or update sync PR
         uses: peter-evans/create-pull-request@v6

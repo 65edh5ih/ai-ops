@@ -1,0 +1,132 @@
+name: Publish CI logs
+description: >-
+  Publish a local directory snapshot into a slice of the dedicated `ci-logs`
+  branch (which lives off `main`). CI logs are consumed only by AI agents, so
+  they are kept out of `main` to avoid history churn, blame noise and repo
+  bloat. Failures here never fail the calling job (logging must not break
+  deploy); they surface as workflow warnings instead.
+inputs:
+  source-dir:
+    description: Local directory whose contents become the destination slice.
+    required: true
+  dest:
+    description: Slice path within the ci-logs branch (e.g. `deploy/latest`).
+    required: true
+  history-dir:
+    description: >-
+      Optional directory within the ci-logs branch where a timestamped per-run
+      copy is kept (e.g. `deploy/history`). Leave blank to disable history.
+    required: false
+    default: ""
+  retention-days:
+    description: >-
+      Days to retain entries under history-dir before pruning. Only used when
+      history-dir is set. Must be a positive integer.
+    required: false
+    default: "30"
+  run-id:
+    description: >-
+      Identifier appended to the history directory name (e.g. github.run_id).
+      Defaults to a UTC timestamp suffix if omitted.
+    required: false
+    default: ""
+  commit-message:
+    description: Commit message for the ci-logs update.
+    required: true
+  token:
+    description: "GitHub token with contents:write permission on this repository."
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SRC: ${{ inputs.source-dir }}
+        DEST: ${{ inputs.dest }}
+        HISTORY_DIR: ${{ inputs.history-dir }}
+        RETENTION_DAYS: ${{ inputs.retention-days }}
+        RUN_ID: ${{ inputs.run-id }}
+        MSG: ${{ inputs.commit-message }}
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -uo pipefail
+
+        if [ ! -d "$SRC" ]; then
+          echo "::warning::publish-ci-logs: source dir '$SRC' is missing; nothing to publish."
+          exit 0
+        fi
+        src_abs="$(cd "$SRC" && pwd)"
+
+        tmp="$(mktemp -d)"
+        cleanup() { rm -rf "$tmp"; }
+        trap cleanup EXIT
+
+        url="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+
+        # Clone the existing ci-logs branch (keeps every other slice intact).
+        # If it does not exist yet, start a fresh orphan branch with no history.
+        if git clone --depth 1 --branch ci-logs "$url" "$tmp" 2>/dev/null; then
+          :
+        else
+          echo "ci-logs branch not found; initializing a fresh orphan branch."
+          git clone --depth 1 "$url" "$tmp"
+          git -C "$tmp" checkout --orphan ci-logs
+          git -C "$tmp" rm -rf . >/dev/null 2>&1 || true
+        fi
+
+        git -C "$tmp" config user.name "github-actions[bot]"
+        git -C "$tmp" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+        # ── latest (backward compat) ─────────────────────────────────────────
+        rm -rf "${tmp:?}/${DEST}"
+        mkdir -p "${tmp}/${DEST}"
+        cp -a "${src_abs}/." "${tmp}/${DEST}/"
+
+        # ── history (optional per-run snapshot + age-based pruning) ──────────
+        if [ -n "${HISTORY_DIR}" ]; then
+          ts="$(date -u +'%Y%m%d-%H%M%S')"
+          entry="${ts}${RUN_ID:+-${RUN_ID}}"
+          mkdir -p "${tmp}/${HISTORY_DIR}/${entry}"
+          cp -a "${src_abs}/." "${tmp}/${HISTORY_DIR}/${entry}/"
+
+          retention="${RETENTION_DAYS:-30}"
+          if [ "$retention" -gt 0 ] && [ -d "${tmp}/${HISTORY_DIR}" ]; then
+            cutoff="$(date -u -d "${retention} days ago" +'%Y%m%d')"
+            while IFS= read -r -d '' dir; do
+              base="$(basename "$dir")"
+              dir_date="${base:0:8}"
+              # Entry names begin with YYYYMMDD-; string comparison is safe for zero-padded dates.
+              if [[ "$dir_date" =~ ^[0-9]{8}$ ]] && [[ "$dir_date" < "$cutoff" ]]; then
+                echo "publish-ci-logs: pruning ${base} (older than ${retention} days)"
+                rm -rf "$dir"
+              fi
+            done < <(find "${tmp}/${HISTORY_DIR}" -maxdepth 1 -mindepth 1 -type d -print0 2>/dev/null)
+          fi
+        fi
+
+        git -C "$tmp" add -A
+        if git -C "$tmp" diff --cached --quiet; then
+          echo "publish-ci-logs: no changes for '${DEST}'."
+          exit 0
+        fi
+        git -C "$tmp" commit -q -m "$MSG"
+
+        pushed=0
+        for i in 1 2 3 4 5; do
+          if git -C "$tmp" push origin HEAD:ci-logs 2>/dev/null; then
+            pushed=1
+            break
+          fi
+          echo "publish-ci-logs: push attempt $i failed; refreshing ci-logs..."
+          if git -C "$tmp" fetch origin ci-logs 2>/dev/null; then
+            git -C "$tmp" rebase origin/ci-logs 2>/dev/null \
+              || git -C "$tmp" rebase --abort 2>/dev/null || true
+          fi
+          sleep "$((i * 3))"
+        done
+
+        if [ "$pushed" != "1" ]; then
+          echo "::warning::publish-ci-logs: failed to push '${DEST}' to ci-logs after retries."
+        fi
+        exit 0

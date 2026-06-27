@@ -23,7 +23,9 @@ symlink にしておけば**両エージェントが同じ AGENTS.md を読む**
 | `scripts/apply-common.mjs` | （下り）consumer の AGENTS.md のマーカー区間へ反映（無ければ追記） |
 | `.github/workflows/sync.yml` | （下り）変更時に各 consumer へ同期PRを自動生成 |
 | `scripts/collect-outbox.mjs` | （上り）consumer の `.ai-ops/outbox/*.md` 提案を `AGENTS_COMMON.md` に取り込む |
-| `.github/workflows/collect-outbox.yml` | （上り）cron で提案を拾い、取り込みPR＋outbox掃除PRを自動生成 |
+| `.github/workflows/collect-outbox.yml` | （上り）repository_dispatch で提案を拾い、取り込みPR＋outbox掃除PRを自動生成 |
+| `shared/**` | （下り）consumer へ丸ごと配布する実ファイル（例: `publish-ci-logs` composite action）。**手で編集しない** |
+| `scripts/apply-shared.mjs` | （下り）`shared/**` を各 consumer の同じパスへコピー（変更時のみ） |
 
 ## セットアップ（1回だけ）
 
