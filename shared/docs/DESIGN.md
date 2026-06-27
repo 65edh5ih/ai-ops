@@ -4,6 +4,8 @@
 （source of truth）として各 consumer へ自動配布するための仕組み。手動リレー（Notion へのコピペ等）を不要にし、
 リポジトリ間のドリフトを構造的に防ぐのが目的。
 
+> **ai-ops 内での正本パス**: `shared/docs/DESIGN.md`（`apply-shared.mjs` により各 consumer へ `docs/DESIGN.md` として配布）。
+
 ## 解決したい問題
 
 - 複数リポジトリ（nikki-san / private …）で AI エージェントに**同じ共通ルールを確実に効かせたい**。
@@ -38,7 +40,7 @@
    - 正本: `AGENTS_COMMON.md`
    - 配布: `scripts/apply-common.mjs` が各 consumer の `AGENTS.md` の `AI-OPS:COMMON` マーカー区間に**埋め込む**
      （マーカーが無ければ末尾に追記＝初回配線）。
-2. **共通インフラ（実ファイル）** = composite action・共有スクリプト等。
+2. **共通インフラ（実ファイル）** = composite action・共有スクリプト・設計ドキュメント等。
    - 正本: `shared/` 配下に consumer のパスをミラーして置く（例: `shared/.github/actions/publish-ci-logs/action.yml`）。
    - 配布: `scripts/apply-shared.mjs` が同じ相対パスへ**そのまま配置**（変更時のみ）。
 
@@ -49,6 +51,7 @@
 | `AGENTS_COMMON.md` | （下り・ルール）共通ルール本体。ここだけ編集する |
 | `scripts/apply-common.mjs` | （下り・ルール）consumer の AGENTS.md マーカー区間へ反映 |
 | `shared/**` | （下り・ファイル）consumer へ丸ごと配布する実ファイル |
+| `shared/docs/DESIGN.md` | （下り・ファイル）本ドキュメント。consumer では `docs/DESIGN.md` として配置される |
 | `scripts/apply-shared.mjs` | （下り・ファイル）`shared/**` を各 consumer の同じパスへコピー |
 | `.github/workflows/sync.yml` | （下り）main の変更で各 consumer へ同期 PR を生成（apply-common + apply-shared） |
 | `consumers.txt` | 配布先リポジトリ（`owner/repo`） |
