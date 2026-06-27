@@ -1,0 +1,70 @@
+name: Sync common rules to consumers
+
+# AGENTS_COMMON.md / consumers.txt / apply-common.mjs を変更して main に入ると、
+# 各 consumer の AGENTS.md の共通ブロックを更新する同期PRを自動生成する。
+# 既定の GITHUB_TOKEN は他リポジトリに書けないため、複数リポジトリ権限の PAT を
+# Secret OPS_SYNC_TOKEN（Contents: RW / Pull requests: RW）で渡すこと。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - AGENTS_COMMON.md
+      - consumers.txt
+      - scripts/apply-common.mjs
+      - .github/workflows/sync.yml
+  workflow_dispatch:
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      consumers: ${{ steps.read.outputs.list }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        # consumers.txt から # と空行を除き、JSON 配列にしてマトリクスへ渡す
+        run: |
+          list=$(grep -vE '^[[:space:]]*(#|$)' consumers.txt | jq -R . | jq -cs .)
+          echo "list=$list" >> "$GITHUB_OUTPUT"
+
+  sync:
+    needs: prepare
+    runs-on: ubuntu-latest
+    if: ${{ needs.prepare.outputs.consumers != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        consumer: ${{ fromJson(needs.prepare.outputs.consumers) }}
+    steps:
+      - name: Checkout ai-ops (source of truth)
+        uses: actions/checkout@v4
+        with:
+          path: ai-ops
+
+      - name: Checkout consumer
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.consumer }}
+          token: ${{ secrets.OPS_SYNC_TOKEN }}
+          path: consumer
+
+      - name: Apply common block to consumer AGENTS.md
+        run: node ai-ops/scripts/apply-common.mjs ai-ops/AGENTS_COMMON.md consumer/AGENTS.md
+
+      - name: Create or update sync PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.OPS_SYNC_TOKEN }}
+          path: consumer
+          base: main
+          branch: ai-ops/sync-common
+          delete-branch: true
+          commit-message: 'chore: sync common rules from ai-ops'
+          title: 'chore: ai-ops 共通ルールを同期'
+          body: |
+            ai-ops の `AGENTS_COMMON.md` に追従して、`AGENTS.md` の共通ブロック
+            （`<!-- AI-OPS:COMMON START -->` 〜 `END`）を更新します。
+
+            - このPRは ai-ops の sync workflow が自動生成しました。
+            - **共通ブロックは手で編集しないでください**（次回同期で上書きされます）。直す場合は ai-ops 側で。
