@@ -1,12 +1,14 @@
-name: Collect common-rule proposals from consumers
+name: Collect outbox proposals from consumers
 
 # consumer → ai-ops の「上り」。各 consumer の .ai-ops/outbox/*.md を1件拾い、
-# AGENTS_COMMON.md への取り込み PR（ai-ops 側）と、取り込んだ提案を消す cleanup PR
-# （consumer 側）を自動生成する。マージは人間（オーナー）が行う。
+# 種別に応じて処理する:
+#   - common-block-edit : AGENTS_COMMON.md への取り込み PR を生成
+#   - shared-file       : shared/<対象パス> への配置 PR を生成
+# いずれも ai-ops 側の取り込み PR と consumer 側の cleanup PR の 2 本を自動生成。
+# マージは人間（オーナー）が行う。
 #
 # トリガーは consumer からの repository_dispatch（即時）。consumer 側の notify workflow が
 # .ai-ops/outbox/** への push を検知して撃つ。手動の workflow_dispatch も残す。
-# （cron ポーリングは即時性のため廃止。取りこぼし対策が要るなら schedule を足す。）
 
 on:
   repository_dispatch:
@@ -33,11 +35,12 @@ jobs:
           done < <(grep -vE '^[[:space:]]*(#|$)' ai-ops/consumers.txt)
 
       - id: collect
-        name: Apply one proposal to AGENTS_COMMON.md
-        run: node ai-ops/scripts/collect-outbox.mjs ai-ops/AGENTS_COMMON.md consumers
+        name: Apply one proposal (common-block-edit or shared-file)
+        run: node ai-ops/scripts/collect-outbox.mjs ai-ops/AGENTS_COMMON.md consumers ai-ops
 
+      # ── common-block-edit: AGENTS_COMMON.md 取り込み PR ────────────────────
       - name: Open take-in PR to ai-ops (AGENTS_COMMON.md)
-        if: steps.collect.outputs.found == 'true'
+        if: steps.collect.outputs.found == 'true' && steps.collect.outputs.type == 'common-block-edit'
         uses: peter-evans/create-pull-request@v6
         with:
           path: ai-ops
@@ -55,6 +58,28 @@ jobs:
             - 内容に問題があれば**マージせず close** してください（提案本文はこの PR の差分に保存されています）。
             - 別途、提案元 consumer には outbox 掃除の PR が立っています。
 
+      # ── shared-file: shared/ 配置 PR ────────────────────────────────────────
+      - name: Open take-in PR to ai-ops (shared/ file)
+        if: steps.collect.outputs.found == 'true' && steps.collect.outputs.type == 'shared-file'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          path: ai-ops
+          token: ${{ secrets.OPS_SYNC_TOKEN }}
+          base: main
+          branch: ai-ops/shared-intake
+          delete-branch: true
+          commit-message: 'chore: shared ファイル提案を取り込み (${{ steps.collect.outputs.consumer }})'
+          title: 'chore: shared/${{ steps.collect.outputs.shared_path }} を更新 (${{ steps.collect.outputs.consumer }})'
+          body: |
+            consumer `${{ steps.collect.outputs.consumer }}` の
+            `.ai-ops/outbox/${{ steps.collect.outputs.proposal }}` を
+            `shared/${{ steps.collect.outputs.shared_path }}` に反映する提案です。
+
+            - この PR をマージすると、既存の sync workflow が全 consumer の対応パスへバイト一致で再配布します。
+            - 内容に問題があれば**マージせず close** してください。
+            - 別途、提案元 consumer には outbox 掃除の PR が立っています。
+
+      # ── 共通: consumer 側 outbox cleanup PR ─────────────────────────────────
       - name: Open cleanup PR to consumer (remove processed proposal)
         if: steps.collect.outputs.found == 'true'
         uses: peter-evans/create-pull-request@v6
