@@ -34,3 +34,11 @@
 - 仕組み（スクリプト・workflow・配布対象）を変えたら、**`shared/docs/DESIGN.md` と `README.md` の該当箇所も更新する**
   （設計と実装を乖離させない）。
 - `consumers.txt` を変えたら PAT のアクセス対象も合わせる。
+
+## 履歴ファイル
+
+- **ai-ops にのみ関わる変更**（スクリプト・workflow 等の内部変更で consumer に影響しないもの）
+  → `docs/history.md` に追記（新しいエントリを先頭に）。
+- **共通基盤に関わる変更**（`AGENTS_COMMON.md`・`shared/` 配下・consumer 全体に影響するもの）
+  → Notion「AI Cross-Repo Task Log」に記録。`docs/history.md` には書かない。
+- 判断基準: 「consumer の手元に影響が届くか」。届くなら Notion。
