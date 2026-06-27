@@ -1,0 +1,5 @@
+# ai-ops が共通ルールを同期する配布先リポジトリ（owner/repo を1行ずつ）。
+# 各リポジトリの AGENTS.md の AI-OPS:COMMON マーカー区間を同期する。
+# 行頭 # と空行は無視。consumer を増やすときはここに追記する（PAT のアクセス対象にも追加すること）。
+65edh5ih/nikki-san
+65edh5ih/private
