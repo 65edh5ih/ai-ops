@@ -20,8 +20,10 @@ symlink にしておけば**両エージェントが同じ AGENTS.md を読む**
 |---|---|
 | `AGENTS_COMMON.md` | 共通ルール本体（**ここだけを編集する**） |
 | `consumers.txt` | 配布先リポジトリ（`owner/repo` を1行ずつ） |
-| `scripts/apply-common.mjs` | consumer の AGENTS.md のマーカー区間へ反映（無ければ追記） |
-| `.github/workflows/sync.yml` | 変更時に各 consumer へ同期PRを自動生成 |
+| `scripts/apply-common.mjs` | （下り）consumer の AGENTS.md のマーカー区間へ反映（無ければ追記） |
+| `.github/workflows/sync.yml` | （下り）変更時に各 consumer へ同期PRを自動生成 |
+| `scripts/collect-outbox.mjs` | （上り）consumer の `.ai-ops/outbox/*.md` 提案を `AGENTS_COMMON.md` に取り込む |
+| `.github/workflows/collect-outbox.yml` | （上り）cron で提案を拾い、取り込みPR＋outbox掃除PRを自動生成 |
 
 ## セットアップ（1回だけ）
 
@@ -31,9 +33,31 @@ symlink にしておけば**両エージェントが同じ AGENTS.md を読む**
 
 ## 運用
 
-- 共通ルールを変えたいとき: **`AGENTS_COMMON.md` を編集して main にマージするだけ**。各 consumer に同期PRが自動で立つ。
+- 共通ルールを変えたいとき（下り・オーナー起点）: **`AGENTS_COMMON.md` を編集して main にマージするだけ**。各 consumer に同期PRが自動で立つ。
 - consumer を増やすとき: `consumers.txt` に追記し、PAT のアクセス対象にもそのリポジトリを追加する。
 - consumer 側の `AGENTS.md` は「共通ブロック（`AI-OPS:COMMON` マーカー囲み・**手で触らない**）＋リポジトリ固有」に分ける。
+
+### 上り（consumer 起点で共通ルールを直す）
+
+consumer での作業中に AI エージェントが共通ルールの不備に気づいても、そのセッションは ai-ops に書けない
+（1セッション1リポジトリ）。そこで**転記せずに源へ届ける**ため、上り経路を用意している:
+
+1. エージェントは作業リポジトリの `.ai-ops/outbox/<時刻>-<説明>.md` に「共通ブロックの編集後・全文」を置く
+   （マーカー区間は触らない）。これは consumer の `main` に載せるだけ。
+2. consumer 側の `notify-ai-ops.yml` が `.ai-ops/outbox/**` の push を検知し、ai-ops に `repository_dispatch`
+   （`outbox-proposal`）を撃つ。ai-ops の `collect-outbox.yml` が即起動して提案を拾い、`AGENTS_COMMON.md` への
+   **取り込み PR**（ai-ops 側）と、取り込んだ提案を消す **cleanup PR**（consumer 側）を自動生成する。
+3. オーナーが取り込み PR をマージ → 既存の `sync.yml` が全 consumer へ配布。
+
+各ファイルの書き手は常に1人（`AGENTS_COMMON.md`＝ai-ops のマージ／マーカー区間＝sync CI／outbox＝その consumer の
+エージェント）。双方向に同じファイルを同期しないので多書き込みドリフトが起きない。
+
+**consumer 側に必要なもの**（上りを即時にするため）:
+
+- workflow `.github/workflows/notify-ai-ops.yml`: `.ai-ops/outbox/**` への push で ai-ops に `repository_dispatch` を撃つ。
+- Actions Secret `OPS_DISPATCH_TOKEN`: ai-ops に `repository_dispatch` を送れる fine-grained PAT（対象 ai-ops / **Contents: RW**）。
+
+これらは「即時性のためにトークン集約を捨てる」判断の代償（各 consumer にトークンを置く）。cron に戻せば consumer 側は不要。
 
 ## 前提・限界
 
