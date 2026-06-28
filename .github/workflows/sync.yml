@@ -41,8 +41,6 @@ jobs:
     steps:
       - name: Checkout ai-ops (source of truth)
         uses: actions/checkout@v4
-        with:
-          path: ai-ops
 
       - name: Checkout consumer
         uses: actions/checkout@v4
@@ -51,13 +49,25 @@ jobs:
           token: ${{ secrets.OPS_SYNC_TOKEN }}
           path: consumer
 
+      - name: Set up log directory
+        run: |
+          mkdir -p /tmp/ci-logs
+          cat > /tmp/ci-logs/summary.md << EOF
+          # Sync: ${{ matrix.consumer }}
+          - Run: ${{ github.run_id }}
+          - Triggered by: ${{ github.event_name }}
+          - Ref: ${{ github.sha }}
+          - Started: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          EOF
+
       - name: Apply common block to consumer AGENTS.md
-        run: node ai-ops/scripts/apply-common.mjs ai-ops/AGENTS_COMMON.md consumer/AGENTS.md
+        run: node scripts/apply-common.mjs AGENTS_COMMON.md consumer/AGENTS.md 2>&1 | tee /tmp/ci-logs/apply-common.log
 
       - name: Apply shared files to consumer (composite actions 等の共通インフラ)
-        run: node ai-ops/scripts/apply-shared.mjs ai-ops/shared consumer
+        run: node scripts/apply-shared.mjs shared consumer 2>&1 | tee /tmp/ci-logs/apply-shared.log
 
       - name: Create or update sync PR
+        id: create-pr
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.OPS_SYNC_TOKEN }}
@@ -73,3 +83,22 @@ jobs:
 
             - このPRは ai-ops の sync workflow が自動生成しました。
             - **共通ブロックは手で編集しないでください**（次回同期で上書きされます）。直す場合は ai-ops 側で。
+
+      - name: Record PR result
+        if: always()
+        run: |
+          echo "- PR URL: ${{ steps.create-pr.outputs.pull-request-url }}" >> /tmp/ci-logs/summary.md
+          echo "- PR Number: ${{ steps.create-pr.outputs.pull-request-number }}" >> /tmp/ci-logs/summary.md
+          echo "- Finished: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> /tmp/ci-logs/summary.md
+
+      - name: Publish CI logs
+        if: always()
+        uses: ./.github/actions/publish-ci-logs
+        with:
+          source-dir: /tmp/ci-logs
+          dest: sync/${{ matrix.consumer }}/latest
+          history-dir: sync/${{ matrix.consumer }}/history
+          retention-days: "30"
+          run-id: ${{ github.run_id }}
+          commit-message: "ci-logs: sync ${{ matrix.consumer }} (run ${{ github.run_id }})"
+          token: ${{ secrets.OPS_SYNC_TOKEN }}

@@ -21,8 +21,17 @@ jobs:
     steps:
       - name: Checkout ai-ops
         uses: actions/checkout@v4
-        with:
-          path: ai-ops
+
+      - name: Set up log directory
+        run: |
+          mkdir -p /tmp/ci-logs
+          cat > /tmp/ci-logs/summary.md << EOF
+          # Collect outbox proposals
+          - Run: ${{ github.run_id }}
+          - Triggered by: ${{ github.event_name }}
+          - Ref: ${{ github.sha }}
+          - Started: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          EOF
 
       - name: Clone consumers (read outbox + stage cleanup)
         env:
@@ -32,18 +41,27 @@ jobs:
           while read -r repo; do
             mkdir -p "consumers/${repo%/*}"
             git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${repo}.git" "consumers/${repo}"
-          done < <(grep -vE '^[[:space:]]*(#|$)' ai-ops/consumers.txt)
+          done < <(grep -vE '^[[:space:]]*(#|$)' consumers.txt)
 
       - id: collect
         name: Apply one proposal (common-block-edit or shared-file)
-        run: node ai-ops/scripts/collect-outbox.mjs ai-ops/AGENTS_COMMON.md consumers ai-ops
+        run: node scripts/collect-outbox.mjs AGENTS_COMMON.md consumers . 2>&1 | tee /tmp/ci-logs/collect-outbox.log
+
+      - name: Record collect result
+        if: always()
+        run: |
+          echo "- Found: ${{ steps.collect.outputs.found }}" >> /tmp/ci-logs/summary.md
+          echo "- Type: ${{ steps.collect.outputs.type }}" >> /tmp/ci-logs/summary.md
+          echo "- Consumer: ${{ steps.collect.outputs.consumer }}" >> /tmp/ci-logs/summary.md
+          echo "- Proposal: ${{ steps.collect.outputs.proposal }}" >> /tmp/ci-logs/summary.md
+          echo "- Finished: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> /tmp/ci-logs/summary.md
 
       # ── common-block-edit: AGENTS_COMMON.md 取り込み PR ────────────────────
       - name: Open take-in PR to ai-ops (AGENTS_COMMON.md)
         if: steps.collect.outputs.found == 'true' && steps.collect.outputs.type == 'common-block-edit'
         uses: peter-evans/create-pull-request@v7
         with:
-          path: ai-ops
+          path: .
           token: ${{ secrets.OPS_SYNC_TOKEN }}
           base: main
           branch: ai-ops-proposal-intake
@@ -63,7 +81,7 @@ jobs:
         if: steps.collect.outputs.found == 'true' && steps.collect.outputs.type == 'shared-file'
         uses: peter-evans/create-pull-request@v7
         with:
-          path: ai-ops
+          path: .
           token: ${{ secrets.OPS_SYNC_TOKEN }}
           base: main
           branch: ai-ops-shared-intake
@@ -94,3 +112,15 @@ jobs:
           body: |
             この提案は ai-ops 側で取り込み PR を作成済みです。outbox から削除します。
             （取り込み PR を close した場合は、この cleanup PR も close してください。提案内容は取り込み PR の差分に残っています。）
+
+      - name: Publish CI logs
+        if: always()
+        uses: ./.github/actions/publish-ci-logs
+        with:
+          source-dir: /tmp/ci-logs
+          dest: collect-outbox/latest
+          history-dir: collect-outbox/history
+          retention-days: "30"
+          run-id: ${{ github.run_id }}
+          commit-message: "ci-logs: collect-outbox (run ${{ github.run_id }})"
+          token: ${{ secrets.OPS_SYNC_TOKEN }}
