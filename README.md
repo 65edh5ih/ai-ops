@@ -3,7 +3,7 @@
 AIエージェント（Codex / Claude Code）向けの **全リポジトリ共通の運用ルール・共通インフラの単一の正（source of truth）**。
 ここで1回直せば、CI が各 consumer リポジトリへ同期PRを自動生成する。手動リレー（Notion等）を不要にするのが目的。
 
-- **設計の全体像（なぜこうなっているか）**: [`shared/docs/DESIGN.md`](shared/docs/DESIGN.md)（consumer では `docs/DESIGN.md` として配置）
+- **設計の全体像（なぜこうなっているか）**: [`shared/docs/OPS_SYNC_DESIGN.md`](shared/docs/OPS_SYNC_DESIGN.md)（consumer では `docs/OPS_SYNC_DESIGN.md` として配置）
 - **このリポジトリで作業するエージェント向けの指示・「何を共有基盤に置くか」の判断ルール**: [`AGENTS.md`](AGENTS.md)
 - 以下は運用手順（how）。
 
@@ -23,7 +23,7 @@ symlink にしておけば**両エージェントが同じ AGENTS.md を読む**
 | ファイル | 役割 |
 |---|---|
 | `AGENTS.md` | ai-ops で作業するエージェント向けの指示・共有基盤に置くかの判断ルール |
-| `shared/docs/DESIGN.md` | 仕組みの設計ドキュメント（アーキテクチャ・判断根拠）。consumer では `docs/DESIGN.md` として配置 |
+| `shared/docs/OPS_SYNC_DESIGN.md` | 仕組みの設計ドキュメント（アーキテクチャ・判断根拠）。consumer では `docs/OPS_SYNC_DESIGN.md` として配置 |
 | `AGENTS_COMMON.md` | 共通ルール本体（**ここだけを編集する**） |
 | `consumers.txt` | 配布先リポジトリ（`owner/repo` を1行ずつ） |
 | `scripts/apply-common.mjs` | （下り）consumer の AGENTS.md のマーカー区間へ反映（無ければ追記） |

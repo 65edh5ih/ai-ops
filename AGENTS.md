@@ -3,7 +3,7 @@
 このリポジトリ **ai-ops** は、全リポジトリ（consumer）共通の **運用ルール**と**共通インフラ（ファイル）** の
 **単一の正（source of truth）**。ここで1回直すと CI が各 consumer へ配布する。
 
-**作業前に必ず [`shared/docs/DESIGN.md`](shared/docs/DESIGN.md) を読むこと。** 仕組みの全体像（下り＝配布／上り＝提案、
+**作業前に必ず [`shared/docs/OPS_SYNC_DESIGN.md`](shared/docs/OPS_SYNC_DESIGN.md) を読むこと。** 仕組みの全体像（下り＝配布／上り＝提案、
 各ファイルの唯一の書き手、トークン構成）が書いてある。運用手順は [`README.md`](README.md)。
 
 ## このリポジトリで変更するとき
@@ -31,7 +31,7 @@
 
 ## 完了手順
 
-- 仕組み（スクリプト・workflow・配布対象）を変えたら、**`shared/docs/DESIGN.md` と `README.md` の該当箇所も更新する**
+- 仕組み（スクリプト・workflow・配布対象）を変えたら、**`shared/docs/OPS_SYNC_DESIGN.md` と `README.md` の該当箇所も更新する**
   （設計と実装を乖離させない）。
 - `consumers.txt` を変えたら PAT のアクセス対象も合わせる。
 

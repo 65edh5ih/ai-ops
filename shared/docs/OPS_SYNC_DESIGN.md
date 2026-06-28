@@ -4,7 +4,7 @@
 （source of truth）として各 consumer へ自動配布するための仕組み。手動リレー（Notion へのコピペ等）を不要にし、
 リポジトリ間のドリフトを構造的に防ぐのが目的。
 
-> **ai-ops 内での正本パス**: `shared/docs/DESIGN.md`（`apply-shared.mjs` により各 consumer へ `docs/DESIGN.md` として配布）。
+> **ai-ops 内での正本パス**: `shared/docs/OPS_SYNC_DESIGN.md`（`apply-shared.mjs` により各 consumer へ `docs/OPS_SYNC_DESIGN.md` として配布）。
 
 ## 解決したい問題
 
@@ -51,7 +51,7 @@
 | `AGENTS_COMMON.md` | （下り・ルール）共通ルール本体。ここだけ編集する |
 | `scripts/apply-common.mjs` | （下り・ルール）consumer の AGENTS.md マーカー区間へ反映 |
 | `shared/**` | （下り・ファイル）consumer へ丸ごと配布する実ファイル |
-| `shared/docs/DESIGN.md` | （下り・ファイル）本ドキュメント。consumer では `docs/DESIGN.md` として配置される |
+| `shared/docs/OPS_SYNC_DESIGN.md` | （下り・ファイル）本ドキュメント。consumer では `docs/OPS_SYNC_DESIGN.md` として配置される |
 | `scripts/apply-shared.mjs` | （下り・ファイル）`shared/**` を各 consumer の同じパスへコピー |
 | `.github/workflows/sync.yml` | （下り）main の変更で各 consumer へ同期 PR を生成（apply-common + apply-shared） |
 | `consumers.txt` | 配布先リポジトリ（`owner/repo`） |
