@@ -21,13 +21,25 @@
 > 共通ブロック（`AGENTS_COMMON.md` の「共通か固有かの判断」節）に置いて全 consumer へ配布している。
 > ここ（ai-ops 内）には、**共通と判断したものを ai-ops の*どこに*置くか**だけを書く。
 
-共通と判断されたものが ai-ops に来たら、2種類に振り分ける:
+共通と判断されたものが ai-ops に来たら、3種類に振り分ける:
 
-- **振る舞いルール（テキスト）** → `AGENTS_COMMON.md`（各 AGENTS.md のマーカー区間へ埋め込み配布）。
+- **常時必要な振る舞いルール（テキスト）** → `AGENTS_COMMON.md`（各 AGENTS.md のマーカー区間へ埋め込み配布）。
+  全タスクのコストに乗るので最小限に。
+- **特定タスクでのみ必要な共通 doc（オンデマンド層）** → `shared/docs/<name>.md`（consumer では `docs/<name>.md`）。
+  `AGENTS_COMMON.md` 側には「発火トリガ＋ポインタ」だけ残し、詳細手順はこちらへ逃がす。参照は **consumer パス
+  `docs/<name>.md`** で書く（埋め込まれた先＝consumer で読まれるため）。例: `cross-repo-history.md` /
+  `outbox-proposal.md` / `ci-logs.md`。
 - **バイト一致であるべき実ファイル**（composite action・共有スクリプト等）→ `shared/` に consumer のパスをミラーして配置。
 
-混同しない: 前者は*埋め込む*もの、後者は*そのまま配置*するもの。配布スクリプトも別
-（`apply-common.mjs` / `apply-shared.mjs`）。
+混同しない: 1番目は*埋め込む*もの、2・3番目は*そのまま配置*するもの。配布スクリプトは埋め込み用
+（`apply-common.mjs`）と配置用（`apply-shared.mjs`、`shared/docs/` を含む `shared/**` を再帰配布）に分かれる。
+
+> ai-ops 内では `docs/<name>.md` を `../shared/docs/<name>.md` への symlink にしておけば、ai-ops 自身の
+> エージェントも consumer と同じパスで読める（`docs/OPS_SYNC_DESIGN.md` と同じ作法）。
+
+オンデマンド共通 doc の上り（consumer 起点の訂正）は **`種別: shared-file` 提案**（`対象パス: docs/<name>.md`）で
+通る。複数 doc 横断・再構成が要る編集は、Notion「AI Cross-Repo Task Log」に依頼を出して ai-ops 側で一括編集してよい
+（outbox 主・Notion 従。`AGENTS_COMMON.md` の該当節と `shared/docs/outbox-proposal.md` 参照）。
 
 ## 完了手順
 
