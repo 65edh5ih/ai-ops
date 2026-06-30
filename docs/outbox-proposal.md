@@ -1,0 +1,1 @@
+../shared/docs/outbox-proposal.md
