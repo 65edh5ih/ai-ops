@@ -8,6 +8,13 @@ ai-ops の作業は通常 consumer に影響する＝本体は Notion「AI Cross
 
 ---
 
+## 2026-07-01 history.md を AI_TASK_HISTORY.md にリネーム
+
+- **なぜ**: 他リポジトリ（consumer）側の履歴ファイル名と統一するため、`docs/history.md` を
+  `docs/AI_TASK_HISTORY.md` にリネーム。参照元（`AGENTS.md`・`.claude/hooks/check-history.sh`）も
+  合わせて更新した。ai-ops 自身の `.claude/` 開発ツールに関する内部変更なので、Notion ではなく
+  ここに記録する（consumer に配布されるファイルではない）。
+
 ## 2026-06-28 履歴の自主記録を Stop フックで促す
 
 - **なぜ**: 完了手順に「履歴を記録せよ」と書いてあるのに ai-ops では一度も自主発火しなかった。原因は
