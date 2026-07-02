@@ -1,58 +1,53 @@
 # ai-ops 設計ドキュメント
 
-全リポジトリ（consumer）共通の **運用ルール**と**共通インフラ（ファイル）** を、ここ ai-ops を単一の正
-（source of truth）として各 consumer へ自動配布するための仕組み。手動リレー（Notion へのコピペ等）を不要にし、
-リポジトリ間のドリフトを構造的に防ぐのが目的。
+全リポジトリ（consumer）共通の **運用ルール**・**共通インフラ（ファイル）**・**リポジトリ横断タスク**を、
+ここ ai-ops を単一の正（source of truth）として各 consumer へ自動配布するための仕組み。手動リレー
+（外部ツールへのコピペ等）を不要にし、リポジトリ間のドリフトを構造的に防ぐのが目的。
 
 > **ai-ops 内での正本パス**: `shared/docs/OPS_SYNC_DESIGN.md`（`apply-shared.mjs` により各 consumer へ `docs/OPS_SYNC_DESIGN.md` として配布）。
 
 ## 解決したい問題
 
 - 複数リポジトリ（nikki-san / private …）で AI エージェントに**同じ共通ルールを確実に効かせたい**。
-- だが Claude Code on the web は **1 セッション 1 リポジトリ**で、複数ディレクトリを足しても兄弟リポジトリの
-  メモリ（AGENTS.md / CLAUDE.md）は自動ロードされない。→ 「全リポジトリの AI に共通ルールを効かせる」唯一堅牢な方法は、
-  **共通ルールを各リポジトリの AGENTS.md に物理的に存在させる**こと。
-- 手動コピペ（Notion 等）は flow であって stock にならず、直し忘れ・コピペずれでドリフトする。
+- だが Claude Code on the web は **1 セッション 1 リポジトリ**で、兄弟リポジトリのメモリ
+  （AGENTS.md / CLAUDE.md）は自動ロードされない。→ 唯一堅牢な方法は、**共通ルールを各リポジトリの
+  AGENTS.md に物理的に存在させる**こと。
+- 同じ制約から「別リポジトリでの作業依頼」も手元に物理的に届ける必要がある（`.ai-ops/tasks/`）。
+- 手動コピペは flow であって stock にならず、直し忘れ・コピペずれでドリフトする。
 
 ## なぜ「双方向同期」ではなく「配布＋提案」なのか
 
-共通ファイルを複数リポジトリで相互同期すると「**書ける場所が複数化** → 多書き込みドリフト・コンフリクト」が起きる。
-これは single-source-of-truth が解決したい問題そのもの。そこで方向を非対称にする:
+共通ファイルを複数リポジトリで相互同期すると「書ける場所が複数化 → 多書き込みドリフト・コンフリクト」が
+起きる。そこで方向を非対称にし、**各ファイルの書き手を常に1人**に保つ:
 
-- **下り（配布）**: ai-ops → 全 consumer。ai-ops を直すと各 consumer に同期 PR が立つ。
-- **上り（提案）**: consumer → ai-ops。consumer のエージェントは「提案」を出すだけで、正本（AGENTS_COMMON.md）を
-  直接書き換えない。取り込みは ai-ops 側の1回のマージに集約。
-
-これにより **各ファイルの書き手は常に1人**に保たれる:
+- **下り（配布）**: ai-ops → 全 consumer。ai-ops の main に入ると各 consumer に同期 PR が立つ。
+  **内容のレビューは ai-ops のマージ時に済んでいる**ので、同期 PR は自動マージしてよい（下記 MERGE_MODE）。
+- **上り（提案）**: consumer → ai-ops。consumer のエージェントは `.ai-ops/outbox/` に「提案」を置くだけで、
+  正本を直接書き換えない。取り込みは ai-ops 側の1回の人間レビュー付きマージに集約。
 
 | ファイル | 唯一の書き手 |
 |---|---|
-| `AGENTS_COMMON.md` | ai-ops でのマージ（人間がレビュー） |
+| `AGENTS_COMMON.md`・`shared/**`・`tasks/**` | ai-ops でのマージ（人間がレビュー） |
 | consumer の `AGENTS.md` マーカー区間 | ai-ops の sync CI |
-| consumer の `shared/` 由来ファイル（例: `publish-ci-logs`） | ai-ops の sync CI |
+| consumer の `.ai-ops/sync-manifest.txt` に列挙されたファイル | ai-ops の sync CI |
 | consumer の `.ai-ops/outbox/*.md` | その consumer のエージェント |
 
-## 三層構造: 「常時ルール」「オンデマンド共通 doc」「実ファイル」
+## 配布物の三層＋タスク
 
-共通化するものを3種類に分けている。**埋め込み方・コスト負担が違うので混同しない**。
+1. **常時必要な共通ルール（テキスト）** — 正本 `AGENTS_COMMON.md`。`apply-common.mjs` が各 consumer の
+   `AGENTS.md` の `AI-OPS:COMMON` マーカー区間に**埋め込む**（マーカーが無ければ末尾に追記＝初回配線）。
+   全 consumer の全タスクのコンテキストコストに乗るため最小限に保つ。
+2. **特定タスクでのみ要る共通 doc** — 正本 `shared/docs/<name>.md`。consumer の `docs/<name>.md` へ配置。
+   常時層からは consumer パス `docs/<name>.md` で参照する。
+3. **共通インフラ（実ファイル）** — 正本 `shared/` 配下に consumer のパスをミラー
+   （例: `shared/.github/actions/publish-ci-logs/action.yml`）。同じ相対パスへ配置。
+4. **リポジトリ横断タスク** — 正本 `tasks/<owner>/<repo>/*.md`。**その consumer だけ**の
+   `.ai-ops/tasks/` へ配置。運用は `docs/cross-repo-tasks.md`。
 
-1. **常時必要な共通ルール（エージェントの振る舞い）** = テキスト。**常時ロード層**。
-   - 正本: `AGENTS_COMMON.md`
-   - 配布: `scripts/apply-common.mjs` が各 consumer の `AGENTS.md` の `AI-OPS:COMMON` マーカー区間に**埋め込む**
-     （マーカーが無ければ末尾に追記＝初回配線）。
-   - ここは全 consumer の**全タスク**のコンテキストコストに乗る。だから最小限に保ち、「発火トリガ＋不可逆ガード＋
-     ポインタ」だけを置く。
-2. **特定タスクでのみ要る共通 doc** = 手順・設計判断のテキスト。**オンデマンド層**。
-   - 正本: `shared/docs/<name>.md`（例: `shared/docs/cross-repo-history.md` / `outbox-proposal.md` / `ci-logs.md`）。
-   - 配布: `scripts/apply-shared.mjs` が `shared/**` の一部として consumer の `docs/<name>.md` へ**そのまま配置**。
-   - `AGENTS_COMMON.md`（常時層）からは **consumer パス `docs/<name>.md`** で参照する（埋め込まれた先＝consumer で
-     読まれるため）。これにより常時層を膨らませずに詳細手順を持てる。
-3. **共通インフラ（実ファイル）** = composite action・共有スクリプト等、**バイト一致であるべきもの**。
-   - 正本: `shared/` 配下に consumer のパスをミラーして置く（例: `shared/.github/actions/publish-ci-logs/action.yml`）。
-   - 配布: `scripts/apply-shared.mjs` が同じ相対パスへ**そのまま配置**（変更時のみ）。
-
-> 2 と 3 はどちらも `shared/**`＝`apply-shared.mjs` で配る（仕組みは同じ）。違いは*用途*: 2 は「進化する散文 doc」、
-> 3 は「バイト一致の実ファイル」。上りも両方 `shared-file` 提案で通る（下記）。
+2〜4 は `apply-shared.mjs` が配布し、配布済み一覧を consumer の **`.ai-ops/sync-manifest.txt`** に記録する。
+**前回 manifest にあって今回の配布物に無いパスは削除**するので、shared/ での撤去・改名やタスク消化も
+consumer へ伝播する（追加しかできない実装だと撤去がドリフトになる）。manifest 導入前から consumer に
+ある unmanaged ファイルの撤去は `sync-deletions.txt`（トゥームストーン）に旧パスを列挙する。
 
 ## コンポーネント
 
@@ -60,65 +55,68 @@
 |---|---|
 | `AGENTS_COMMON.md` | （下り・ルール）共通ルール本体。ここだけ編集する |
 | `scripts/apply-common.mjs` | （下り・ルール）consumer の AGENTS.md マーカー区間へ反映 |
-| `shared/**` | （下り・ファイル）consumer へ丸ごと配布する実ファイル |
-| `shared/docs/OPS_SYNC_DESIGN.md` | （下り・ファイル）本ドキュメント。consumer では `docs/OPS_SYNC_DESIGN.md` として配置される |
-| `scripts/apply-shared.mjs` | （下り・ファイル）`shared/**` を各 consumer の同じパスへコピー |
-| `.github/workflows/sync.yml` | （下り）main の変更で各 consumer へ同期 PR を生成（apply-common + apply-shared） |
+| `shared/**` / `tasks/**` | （下り・ファイル）consumer へ配布する実ファイル・タスク |
+| `scripts/apply-shared.mjs` | （下り・ファイル）shared/tasks の配置＋manifest 差分による削除伝播 |
+| `sync-deletions.txt` | （下り）manifest 導入前の unmanaged ファイルを consumer から撤去する一覧 |
+| `.github/workflows/sync.yml` | （下り）main の変更で各 consumer へ同期 PR を生成し、MERGE_MODE に応じてマージ |
 | `consumers.txt` | 配布先リポジトリ（`owner/repo`） |
-| `scripts/collect-outbox.mjs` | （上り）consumer の `.ai-ops/outbox/*.md` 提案を `AGENTS_COMMON.md` に取り込む |
-| `.github/workflows/collect-outbox.yml` | （上り）`repository_dispatch` で起動、取り込み PR＋outbox 掃除 PR を生成 |
+| `scripts/collect-outbox.mjs` | （上り）consumer の `.ai-ops/outbox/*.md` 提案を種別に応じて反映 |
+| `.github/workflows/collect-outbox.yml` | （上り）cron（約6時間ごと）＋手動で起動、取り込み PR＋outbox 掃除 PR を生成 |
 
-consumer 側に必要なもの:
-
-- `.github/workflows/notify-ai-ops.yml`: `.ai-ops/outbox/**` への push で ai-ops に `repository_dispatch` を撃つ。
-- Secret `OPS_DISPATCH_TOKEN`: ai-ops に dispatch できる PAT（Contents: RW）。
+consumer 側に必要な配線は**無い**（workflow・Secret とも不要）。consumer を増やすときは
+`consumers.txt` への追記と `OPS_SYNC_TOKEN`（PAT）のアクセス対象追加だけ。
 
 ## データフロー
 
-### 下り（共通ルール／ファイルを変える・オーナー起点）
+### 下り（共通ルール／ファイル／タスクを変える・オーナー起点）
 
 ```
-ai-ops: AGENTS_COMMON.md or shared/** を編集して main にマージ
+ai-ops: AGENTS_COMMON.md / shared/** / tasks/** を編集して main にマージ
    └─ sync.yml が各 consumer をチェックアウト
         ├─ apply-common.mjs: AGENTS.md のマーカー区間を更新
-        └─ apply-shared.mjs: shared/** を同じパスへ配置
+        └─ apply-shared.mjs: shared/** と tasks/<その consumer>/** を配置、
+                             manifest 差分＋sync-deletions.txt のファイルを削除
    └─ 各 consumer に同期 PR（ブランチ ai-ops/sync-common）
-オーナーが各 consumer で同期 PR をマージ → 反映完了
+        └─ MERGE_MODE=direct なら即マージ / auto なら auto-merge / off なら手動
 ```
 
-### 上り（consumer 起点で共通ルールを直す・転記なし）
+### 上り（consumer 起点の提案・4種別）
 
 ```
-consumer: エージェントが .ai-ops/outbox/<時刻>-<説明>.md（共通ブロック編集後の全文）を main に push
-   └─ notify-ai-ops.yml が ai-ops に repository_dispatch(outbox-proposal)
-        └─ collect-outbox.yml 起動
-             ├─ AGENTS_COMMON.md への取り込み PR（ai-ops 側）
-             └─ outbox 掃除 PR（consumer 側）
-オーナーが取り込み PR をマージ → 下りに合流して全 consumer へ配布
+consumer: エージェントが .ai-ops/outbox/<時刻>-<説明>.md を main に載せる
+   └─ collect-outbox.yml（cron 約6時間ごと・手動可）が全 consumer を clone して最古の1件を処理
+        ├─ common-block-edit : AGENTS_COMMON.md を全文置換（ベースハッシュで鮮度検査）
+        ├─ shared-file       : shared/<対象パス> を置換
+        ├─ task              : tasks/<対象リポジトリ>/ に登録
+        └─ task-done         : tasks/<提案元>/<対象ファイル> を削除
+   └─ ai-ops への取り込み PR ＋ 提案元への outbox 掃除 PR を生成
+オーナーが取り込み PR をマージ → 下り（sync）に合流して配布
 ```
+
+書式・鮮度検査（`ベース:`）の詳細は `docs/outbox-proposal.md`。
 
 ## トークン
 
 | Secret | 置き場所 | 権限 | 用途 |
 |---|---|---|---|
-| `OPS_SYNC_TOKEN` | ai-ops | ai-ops＋全 consumer / Contents:RW, PR:RW | 下り同期 PR・上り取り込み/掃除 PR の作成、consumer の読み取り |
-| `OPS_DISPATCH_TOKEN` | 各 consumer | ai-ops / Contents:RW | 上りの `repository_dispatch` 送信 |
+| `OPS_SYNC_TOKEN` | ai-ops のみ | ai-ops＋全 consumer / Contents:RW, PR:RW | 下り同期 PR・上り取り込み/掃除 PR の作成、consumer の読み取り |
 
-> 即時性（上りをイベント駆動に）を取るため、トークンを ai-ops に集約せず consumer にも置く設計を選んだ。
-> cron ポーリングに戻せば consumer 側トークンは不要だが、反映が遅延する。
+> 以前は上りを即時にするため各 consumer に `OPS_DISPATCH_TOKEN`（ai-ops への Contents:RW）を置いて
+> `repository_dispatch` していたが、「どの consumer からでもルールの正本に書けるトークン」が増殖する
+> 設計だった（consumer が1つ侵害されると全リポジトリへルールを注入できる増幅経路）。ルール訂正に
+> 即時性は不要なので cron ポーリングに変更し、consumer 側のトークン・workflow を全廃した。
+> ai-ops の main にはブランチ保護を掛けておくこと（PAT による直 push の防止）。
 
 ## 前提・限界
 
 - consumer の既定ブランチは `main` 前提（sync の base）。
-- 初回、consumer に同等のインライン記述がある場合は、配線 PR が重複を生むため**その consumer だけ初回手作業**で
-  「インライン削除＋マーカー挿入」を行う（以降はマーカーがあるので置換され重複しない）。
-- **上りは2種別を実装済み**: `common-block-edit`（→ `AGENTS_COMMON.md`）と `shared-file`（→ `shared/<対象パス>`）。
-  後者は composite action 等の実ファイルだけでなく**オンデマンド共通 doc（`shared/docs/<name>.md`）も対象**
-  （`対象パス: docs/<name>.md`）。`collect-outbox.mjs` / `collect-outbox.yml` が両種別の取り込み PR を生成する。
-- **散文 doc の横断的・構造的な編集は Notion でエスカレーションする（outbox 主・Notion 従）**。`shared-file` 提案は
-  全文置換なので、複数 doc にまたがる再構成・dedupe には向かない。その場合は consumer が Notion「AI Cross-Repo
-  Task Log」に依頼を出し、ai-ops にスコープされたセッションが全体を見て一括編集する。Notion が運ぶのは**タスク
-  （依頼）**であって正本コンテンツではない（正本は常に ai-ops）。Notion バックログは人手で drain する点が
-  outbox（CI で自動排出）と違うので、エスカレーションは頻度の低い構造変更に絞り、日常の1点訂正は outbox に流す。
-- Codex は `AGENTS.md`、Claude Code は `CLAUDE.md` を読む。consumer 側で `CLAUDE.md -> AGENTS.md` symlink にすれば
-  両エージェントが同じ AGENTS.md（＝配布される共通ブロック）を読む。
+- 初回、consumer に同等のインライン記述がある場合は、その consumer だけ初回手作業で
+  「インライン削除＋マーカー挿入」を行う（以降はマーカーで置換され重複しない）。
+- 上りの取り込みは**全文置換**なので、複数 doc にまたがる再構成には向かない。その場合は
+  ai-ops のセッションで一括編集する（consumer からは `docs/outbox-proposal.md` の該当節参照）。
+- collect は1回の実行で1件だけ処理する。後続提案は先行の cleanup PR マージ後に順次処理される。
+- 提案・タスクの「なぜ」は frontmatter の `理由:` → 取り込み PR 本文 → ai-ops の PR/git 履歴に残る。
+  consumer のエージェントから ai-ops の履歴は見えないため、**consumer 側でも将来参照しそうな判断根拠は
+  配布 doc（`shared/docs/`）自体に書き込む**こと。
+- Codex は `AGENTS.md`、Claude Code は `CLAUDE.md` を読む。consumer 側で `CLAUDE.md -> AGENTS.md`
+  symlink にすれば両エージェントが同じ AGENTS.md（＝配布される共通ブロック）を読む。

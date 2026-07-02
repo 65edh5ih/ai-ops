@@ -4,23 +4,37 @@ name: Collect outbox proposals from consumers
 # 種別に応じて処理する:
 #   - common-block-edit : AGENTS_COMMON.md への取り込み PR を生成
 #   - shared-file       : shared/<対象パス> への配置 PR を生成
+#   - task              : tasks/<対象リポジトリ>/ への登録 PR を生成
+#   - task-done         : tasks/<提案元>/<対象ファイル> の削除 PR を生成
 # いずれも ai-ops 側の取り込み PR と consumer 側の cleanup PR の 2 本を自動生成。
 # マージは人間（オーナー）が行う。
 #
-# トリガーは consumer からの repository_dispatch（即時）。consumer 側の notify workflow が
-# .ai-ops/outbox/** への push を検知して撃つ。手動の workflow_dispatch も残す。
+# トリガーは cron ポーリング＋手動。以前は consumer からの repository_dispatch（即時）
+# だったが、そのために各 consumer へ ai-ops に Contents:RW できる PAT を置く必要があり、
+# 「どの consumer からでもルールの正本に書ける」トークンが増殖していた。ルール訂正に
+# 即時性は不要なので、consumer 側のトークン・workflow を全廃してポーリングに戻した。
+# 急ぐときは workflow_dispatch で手動起動する。
 
 on:
-  repository_dispatch:
-    types: [outbox-proposal]
+  schedule:
+    - cron: '23 */6 * * *'
   workflow_dispatch:
+
+concurrency:
+  group: collect-outbox
+  cancel-in-progress: false
 
 jobs:
   collect:
     runs-on: ubuntu-latest
     steps:
+      # consumer の clone を ai-ops のチェックアウト内に置くと、取り込み PR 作成時の
+      # git add -A が nested repo を gitlink として拾ってしまう。ai-ops と consumers を
+      # workspace 直下の兄弟ディレクトリに分離する。
       - name: Checkout ai-ops
         uses: actions/checkout@v4
+        with:
+          path: ai-ops
 
       - name: Set up log directory
         run: |
@@ -41,11 +55,13 @@ jobs:
           while read -r repo; do
             mkdir -p "consumers/${repo%/*}"
             git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${repo}.git" "consumers/${repo}"
-          done < <(grep -vE '^[[:space:]]*(#|$)' consumers.txt)
+          done < <(grep -vE '^[[:space:]]*(#|$)' ai-ops/consumers.txt)
 
       - id: collect
-        name: Apply one proposal (common-block-edit or shared-file)
-        run: node scripts/collect-outbox.mjs AGENTS_COMMON.md consumers . 2>&1 | tee /tmp/ci-logs/collect-outbox.log
+        name: Apply one proposal
+        env:
+          PR_BODY_PATH: ${{ runner.temp }}/pr-body.md
+        run: node ai-ops/scripts/collect-outbox.mjs ai-ops/AGENTS_COMMON.md consumers ai-ops 2>&1 | tee /tmp/ci-logs/collect-outbox.log
 
       - name: Record collect result
         if: always()
@@ -56,48 +72,19 @@ jobs:
           echo "- Proposal: ${{ steps.collect.outputs.proposal }}" >> /tmp/ci-logs/summary.md
           echo "- Finished: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> /tmp/ci-logs/summary.md
 
-      # ── common-block-edit: AGENTS_COMMON.md 取り込み PR ────────────────────
-      - name: Open take-in PR to ai-ops (AGENTS_COMMON.md)
-        if: steps.collect.outputs.found == 'true' && steps.collect.outputs.type == 'common-block-edit'
+      - name: Open intake PR to ai-ops
+        if: steps.collect.outputs.found == 'true'
         uses: peter-evans/create-pull-request@v7
         with:
-          path: .
+          path: ai-ops
           token: ${{ secrets.OPS_SYNC_TOKEN }}
           base: main
-          branch: ai-ops-proposal-intake
+          branch: ${{ steps.collect.outputs.branch }}
           delete-branch: true
-          commit-message: 'chore: 共通ルール提案を取り込み (${{ steps.collect.outputs.consumer }})'
-          title: 'chore: 共通ルール提案を取り込み (${{ steps.collect.outputs.consumer }})'
-          body: |
-            consumer `${{ steps.collect.outputs.consumer }}` の
-            `.ai-ops/outbox/${{ steps.collect.outputs.proposal }}` を `AGENTS_COMMON.md` に反映する提案です。
+          commit-message: ${{ steps.collect.outputs.pr_title }}
+          title: ${{ steps.collect.outputs.pr_title }}
+          body-path: ${{ runner.temp }}/pr-body.md
 
-            - この PR をマージすると、既存の sync workflow が全 consumer の `AGENTS.md` 共通ブロックへ配布します。
-            - 内容に問題があれば**マージせず close** してください（提案本文はこの PR の差分に保存されています）。
-            - 別途、提案元 consumer には outbox 掃除の PR が立っています。
-
-      # ── shared-file: shared/ 配置 PR ────────────────────────────────────────
-      - name: Open take-in PR to ai-ops (shared/ file)
-        if: steps.collect.outputs.found == 'true' && steps.collect.outputs.type == 'shared-file'
-        uses: peter-evans/create-pull-request@v7
-        with:
-          path: .
-          token: ${{ secrets.OPS_SYNC_TOKEN }}
-          base: main
-          branch: ai-ops-shared-intake
-          delete-branch: true
-          commit-message: 'chore: shared ファイル提案を取り込み (${{ steps.collect.outputs.consumer }})'
-          title: 'chore: shared/${{ steps.collect.outputs.shared_path }} を更新 (${{ steps.collect.outputs.consumer }})'
-          body: |
-            consumer `${{ steps.collect.outputs.consumer }}` の
-            `.ai-ops/outbox/${{ steps.collect.outputs.proposal }}` を
-            `shared/${{ steps.collect.outputs.shared_path }}` に反映する提案です。
-
-            - この PR をマージすると、既存の sync workflow が全 consumer の対応パスへバイト一致で再配布します。
-            - 内容に問題があれば**マージせず close** してください。
-            - 別途、提案元 consumer には outbox 掃除の PR が立っています。
-
-      # ── 共通: consumer 側 outbox cleanup PR ─────────────────────────────────
       - name: Open cleanup PR to consumer (remove processed proposal)
         if: steps.collect.outputs.found == 'true'
         uses: peter-evans/create-pull-request@v7
@@ -105,17 +92,19 @@ jobs:
           path: ${{ steps.collect.outputs.consumer_dir }}
           token: ${{ secrets.OPS_SYNC_TOKEN }}
           base: main
-          branch: ai-ops-outbox-cleanup
+          branch: ${{ steps.collect.outputs.cleanup_branch }}
           delete-branch: true
           commit-message: 'chore: 取り込み済みの ai-ops 提案を outbox から削除'
-          title: 'chore: 取り込み済みの ai-ops 提案を outbox から削除'
+          title: 'chore: 取り込み済みの ai-ops 提案を outbox から削除 (${{ steps.collect.outputs.proposal }})'
           body: |
             この提案は ai-ops 側で取り込み PR を作成済みです。outbox から削除します。
             （取り込み PR を close した場合は、この cleanup PR も close してください。提案内容は取り込み PR の差分に残っています。）
 
+            後続の提案は、この cleanup PR がマージされた後の collect 実行で順に処理されます。
+
       - name: Publish CI logs
         if: always()
-        uses: ./.github/actions/publish-ci-logs
+        uses: ./ai-ops/.github/actions/publish-ci-logs
         with:
           source-dir: /tmp/ci-logs
           dest: collect-outbox/latest
