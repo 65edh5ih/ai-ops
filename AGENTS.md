@@ -49,7 +49,8 @@
 ## 履歴ファイル
 
 ai-ops での作業の「**なぜ**」（コードに無い制約・判断根拠）は **`docs/AI_TASK_HISTORY.md`** に追記する
-（新しいエントリを先頭に）。consumer に影響する変更・ai-ops 内部だけの変更の区別なく、ここ1箇所でよい:
+（書き方・アーカイブは全リポジトリ共通規約 [`docs/task-history.md`](docs/task-history.md) に従う）。
+consumer に影響する変更・ai-ops 内部だけの変更の区別なく、ここ1箇所でよい:
 上り提案由来の変更は取り込み PR の本文（`理由:`）にも経緯が残り、consumer 側で将来参照しそうな判断根拠は
 配布 doc（`shared/docs/`）自体に書き込むため（→ OPS_SYNC_DESIGN.md「前提・限界」）。
 
