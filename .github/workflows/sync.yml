@@ -1,9 +1,16 @@
 name: Sync common rules to consumers
 
-# AGENTS_COMMON.md / consumers.txt / apply-common.mjs を変更して main に入ると、
-# 各 consumer の AGENTS.md の共通ブロックを更新する同期PRを自動生成する。
+# AGENTS_COMMON.md / shared/** / tasks/** / sync-deletions.txt / 配布スクリプトを変更して
+# main に入ると、各 consumer へ同期PRを自動生成する。
 # 既定の GITHUB_TOKEN は他リポジトリに書けないため、複数リポジトリ権限の PAT を
 # Secret OPS_SYNC_TOKEN（Contents: RW / Pull requests: RW）で渡すこと。
+#
+# MERGE_MODE — 同期PRの扱い（内容は ai-ops の main マージ時点でレビュー済みなので、
+# consumer 側での再レビューは原則不要という設計）:
+#   direct : 生成後に即マージする（完全自動。consumer main に直結する）
+#   auto   : GitHub の auto-merge を有効化する（consumer 側に branch protection＋
+#            required checks が必要。無ければ失敗して PR は open のまま＝手動マージ）
+#   off    : 何もしない（従来どおり手動マージ）
 
 on:
   push:
@@ -11,11 +18,16 @@ on:
     paths:
       - AGENTS_COMMON.md
       - consumers.txt
+      - sync-deletions.txt
       - scripts/apply-common.mjs
       - scripts/apply-shared.mjs
       - shared/**
+      - tasks/**
       - .github/workflows/sync.yml
   workflow_dispatch:
+
+env:
+  MERGE_MODE: auto
 
 jobs:
   prepare:
@@ -63,8 +75,8 @@ jobs:
       - name: Apply common block to consumer AGENTS.md
         run: node scripts/apply-common.mjs AGENTS_COMMON.md consumer/AGENTS.md 2>&1 | tee /tmp/ci-logs/apply-common.log
 
-      - name: Apply shared files to consumer (composite actions 等の共通インフラ)
-        run: node scripts/apply-shared.mjs shared consumer 2>&1 | tee /tmp/ci-logs/apply-shared.log
+      - name: Apply shared files / tasks / deletions to consumer
+        run: node scripts/apply-shared.mjs . consumer "${{ matrix.consumer }}" 2>&1 | tee /tmp/ci-logs/apply-shared.log
 
       - name: Create or update sync PR
         id: create-pr
@@ -78,17 +90,37 @@ jobs:
           commit-message: 'chore: sync common rules from ai-ops'
           title: 'chore: ai-ops 共通ルールを同期'
           body: |
-            ai-ops の `AGENTS_COMMON.md` に追従して、`AGENTS.md` の共通ブロック
-            （`<!-- AI-OPS:COMMON START -->` 〜 `END`）を更新します。
+            ai-ops（単一の正）に追従して、次を更新します:
 
-            - このPRは ai-ops の sync workflow が自動生成しました。
-            - **共通ブロックは手で編集しないでください**（次回同期で上書きされます）。直す場合は ai-ops 側で。
+            - `AGENTS.md` の共通ブロック（`<!-- AI-OPS:COMMON START -->` 〜 `END`）
+            - `shared/` 由来の配布ファイル（`docs/` の共通 doc・composite action 等）
+            - このリポジトリ宛のタスク（`.ai-ops/tasks/`）
+            - 撤去されたファイルの削除（`.ai-ops/sync-manifest.txt` 基準）
+
+            このPRは ai-ops の sync workflow が自動生成しました。内容のレビューは ai-ops 側の
+            マージ時に済んでいます。**同期対象のファイルは手で編集しないでください**
+            （次回同期で上書きされます）。直す場合は `.ai-ops/outbox/` 提案で（→ `docs/outbox-proposal.md`）。
+
+      - name: Merge sync PR (per MERGE_MODE)
+        if: env.MERGE_MODE != 'off' && steps.create-pr.outputs.pull-request-url != ''
+        env:
+          GH_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
+        run: |
+          url="${{ steps.create-pr.outputs.pull-request-url }}"
+          if [ "$MERGE_MODE" = "direct" ]; then
+            gh pr merge --squash "$url" \
+              || echo "::warning::direct merge failed; PR left open: $url"
+          else
+            gh pr merge --auto --squash "$url" \
+              || echo "::warning::auto-merge could not be enabled (consumer repo needs branch protection with required checks, or set MERGE_MODE: direct); PR left open: $url"
+          fi
 
       - name: Record PR result
         if: always()
         run: |
           echo "- PR URL: ${{ steps.create-pr.outputs.pull-request-url }}" >> /tmp/ci-logs/summary.md
           echo "- PR Number: ${{ steps.create-pr.outputs.pull-request-number }}" >> /tmp/ci-logs/summary.md
+          echo "- Merge mode: ${MERGE_MODE}" >> /tmp/ci-logs/summary.md
           echo "- Finished: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> /tmp/ci-logs/summary.md
 
       - name: Publish CI logs

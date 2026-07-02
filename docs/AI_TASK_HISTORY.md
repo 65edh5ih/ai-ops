@@ -1,12 +1,32 @@
 # ai-ops 作業履歴
 
-consumer に**届かない** ai-ops 内部だけの変更（collect/sync スクリプト・ai-ops 自身の workflow・`.claude/` の
-開発ツール等）の履歴。**新しいエントリを先頭に**追記する。残すのは「**なぜ**」その変更をしたか。
-
-ai-ops の作業は通常 consumer に影響する＝本体は Notion「AI Cross-Repo Task Log」に書く。ここは**例外**。
-振り分けルールは [`AGENTS.md`](../AGENTS.md) の「履歴ファイル」節を参照。
+ai-ops での作業の履歴。**新しいエントリを先頭に**追記する。残すのは「**なぜ**」その変更をしたか
+（コードに無い制約・判断根拠）。consumer に影響する変更・内部だけの変更の区別なくここ1箇所
+（→ [`AGENTS.md`](../AGENTS.md)「履歴ファイル」節）。
 
 ---
+
+## 2026-07-02 上りを cron 化・削除伝播とタスク配布を追加・Notion 依存を撤去
+
+- **なぜ**: オーナーから「この仕組みはベストプラクティスか」とゼロベース評価を求められ、次の問題を確認した。
+  (1) 上りの `repository_dispatch` は各 consumer に ai-ops への Contents:RW PAT（`OPS_DISPATCH_TOKEN`）を
+  要求し、「consumer が1つ侵害されると全リポジトリへルールを注入できる」増幅経路だった。ルール訂正に
+  即時性は不要なので cron ポーリング（6時間ごと＋手動）に変更し、consumer 側の workflow・Secret を全廃。
+  (2) `apply-shared.mjs` は追加・更新しかできず、shared/ から撤去したファイルが consumer に残留する
+  ドリフトがあった → 配布一覧を consumer の `.ai-ops/sync-manifest.txt` に記録し、差分で削除を伝播。
+  manifest 導入前の unmanaged ファイル（`notify-ai-ops.yml` 等）は `sync-deletions.txt` で撤去。
+  (3) `common-block-edit` は全文置換のため、古い版ベースの提案で新しい変更が黙って巻き戻る lost update が
+  あった → frontmatter `ベース:`（ブロックの sha256 先頭12桁）で鮮度検査し、不一致は PR タイトルで警告。
+  (4) Notion「AI Cross-Repo Task Log」への依存（横断タスク依頼・履歴）を ai-ops に吸収: 依頼は
+  `tasks/<owner>/<repo>/` → sync で対象の `.ai-ops/tasks/` へ配布（outbox `種別: task` / `task-done` で
+  consumer 起点の起票・消化も可能）。履歴は提案 frontmatter の `理由:` が取り込み PR 本文に残る形にし、
+  このファイルを ai-ops の唯一の履歴とした。
+- **設計判断**: 同期 PR は「内容レビューは ai-ops マージ時に済んでいる」ため自動マージしてよい
+  （`sync.yml` の `MERGE_MODE`。既定 `auto`、consumer 側に required checks が無ければ手動のまま）。
+  取り込み PR のブランチ名を提案ごとに変えたのは、先行 PR が open のまま次を処理すると固定ブランチ名では
+  force-push で潰し合うため。collect の checkout を `ai-ops/`・`consumers/` の兄弟配置にしたのは、
+  consumer clone が ai-ops checkout 内にあると取り込み PR の `git add -A` が nested repo を gitlink として
+  拾う潜在バグがあったため。
 
 ## 2026-07-01 history.md を AI_TASK_HISTORY.md にリネーム
 

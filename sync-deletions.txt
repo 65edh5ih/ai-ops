@@ -1,0 +1,6 @@
+# consumer から削除するパス（1行1パス・consumer ルート相対。# と空行は無視）。
+# manifest（.ai-ops/sync-manifest.txt）導入前に consumer へ配置され、もう不要になった
+# ファイルの撤去用。manifest 管理下のファイルは shared/ から消せば自動で削除が伝播する
+# ので、ここに書く必要はない。全 consumer で削除が済んだら行を消してよい。
+.github/workflows/notify-ai-ops.yml
+docs/cross-repo-history.md
