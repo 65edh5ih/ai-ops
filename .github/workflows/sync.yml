@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
 
 env:
-  MERGE_MODE: auto
+  MERGE_MODE: direct
 
 jobs:
   prepare:
