@@ -1,0 +1,1 @@
+../../../.claude/skills/ci-logs/SKILL.md

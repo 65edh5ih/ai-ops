@@ -40,8 +40,11 @@
 2. **特定タスクでのみ要る共通 doc** — 正本 `shared/docs/<name>.md`。consumer の `docs/<name>.md` へ配置。
    常時層からは consumer パス `docs/<name>.md` で参照する。手順系 doc（SOP）は書式規約
    `docs/sop-format.md` に従って書き、`shared/.claude/skills/<name>/SKILL.md`（正本）と
-   `shared/.codex/skills/<name>/SKILL.md`（前者への symlink）の薄い skill ラッパーを添えると、
-   Claude Code / Codex の双方が該当タスクで自動発火できる（本体は常に `docs/` 側。SKILL.md はポインタのみ）。
+   各エージェントのミラー（`shared/.codex/skills/`・`shared/.openhands/skills/`・`shared/.gemini/skills/`、
+   いずれも正本への symlink）の薄い skill ラッパーを添えると、各エージェントが該当タスクで自動発火できる
+   （本体は常に `docs/` 側。SKILL.md はポインタのみ）。Gemini CLI は既定では AGENTS.md を読まないため、
+   `shared/.gemini/settings.json`（`context.fileName` に AGENTS.md を指定）も配布する。
+   consumer が Gemini 設定を固有化したくなったら、このファイルは shared/ から外す判断をする。
 3. **共通インフラ（実ファイル）** — 正本 `shared/` 配下に consumer のパスをミラー
    （例: `shared/.github/actions/publish-ci-logs/action.yml`）。同じ相対パスへ配置。
 4. **リポジトリ横断タスク** — 正本 `tasks/<owner>/<repo>/*.md`。**その consumer だけ**の

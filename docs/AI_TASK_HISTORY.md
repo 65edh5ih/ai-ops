@@ -5,6 +5,21 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
 
 ---
 
+## 2026-07-05 SOP skills ラッパーに OpenHands・Gemini CLI ミラーを追加
+
+- **なぜ**: オーナーから「OpenHands も参加できるか」→「Gemini CLI も含めて足して」の依頼。
+  両ツールとも SKILL.md 共通標準を読むが、スキャンパスが異なる（OpenHands: `.openhands/skills/`、
+  Gemini CLI: `.gemini/skills/`）ため、Codex と同じ「正本 `.claude/` ＋ ミラー symlink」方式で追加。
+  SOP 本体を `docs/` のプレーン Markdown に置いた設計のおかげで、ラッパー5本×2エージェントの
+  symlink 追加だけで済んだ（本体・書式の変更なし）。
+- **設計判断**: Gemini CLI は既定で GEMINI.md しか常時コンテキストに読まないため、
+  `shared/.gemini/settings.json`（`context.fileName: ["AGENTS.md", "GEMINI.md"]`）も配布して
+  常時ロード層（AGENTS.md 共通ブロック）を効かせた。consumer が Gemini 設定を固有化したくなったら
+  この settings.json を shared/ から外す（同期がローカル編集を上書きするため）——設計 doc に明記。
+  OpenHands は AGENTS.md をネイティブに読むので設定ファイル不要。OpenHands の skills は
+  トリガ未指定だと常時注入になるが、ラッパーは2〜3行なのでコスト無視できると判断し、
+  独自トリガ形式への分岐は導入しない（標準形式のまま全エージェント共通）。
+
 ## 2026-07-05 collect-outbox / sync workflow の Node.js 20 廃止対応
 
 - **なぜ**: `collect-outbox.yml` 実行時に actions/checkout@v4・peter-evans/create-pull-request@v7 が
