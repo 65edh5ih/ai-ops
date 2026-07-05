@@ -38,7 +38,10 @@
    `AGENTS.md` の `AI-OPS:COMMON` マーカー区間に**埋め込む**（マーカーが無ければ末尾に追記＝初回配線）。
    全 consumer の全タスクのコンテキストコストに乗るため最小限に保つ。
 2. **特定タスクでのみ要る共通 doc** — 正本 `shared/docs/<name>.md`。consumer の `docs/<name>.md` へ配置。
-   常時層からは consumer パス `docs/<name>.md` で参照する。
+   常時層からは consumer パス `docs/<name>.md` で参照する。手順系 doc（SOP）は書式規約
+   `docs/sop-format.md` に従って書き、`shared/.claude/skills/<name>/SKILL.md`（正本）と
+   `shared/.codex/skills/<name>/SKILL.md`（前者への symlink）の薄い skill ラッパーを添えると、
+   Claude Code / Codex の双方が該当タスクで自動発火できる（本体は常に `docs/` 側。SKILL.md はポインタのみ）。
 3. **共通インフラ（実ファイル）** — 正本 `shared/` 配下に consumer のパスをミラー
    （例: `shared/.github/actions/publish-ci-logs/action.yml`）。同じ相対パスへ配置。
 4. **リポジトリ横断タスク** — 正本 `tasks/<owner>/<repo>/*.md`。**その consumer だけ**の
@@ -110,6 +113,10 @@ consumer: エージェントが .ai-ops/outbox/<時刻>-<説明>.md を main に
 ## 前提・限界
 
 - consumer の既定ブランチは `main` 前提（sync の base）。
+- `shared/` 内の symlink は配布時に**実体化**される（`apply-shared.mjs` はファイル内容を読んでコピーする）。
+  consumer には通常ファイルとして届くので、同一内容の二重配置（`.claude/skills/` と `.codex/skills/`）は
+  ai-ops 側で symlink にしてドリフトを防ぐ。symlink の張り先が `shared/` の外だと CI の checkout に
+  依存するため、**張り先も `shared/` 内に置くこと**。
 - 初回、consumer に同等のインライン記述がある場合は、その consumer だけ初回手作業で
   「インライン削除＋マーカー挿入」を行う（以降はマーカーで置換され重複しない）。
 - 上りの取り込みは**全文置換**なので、複数 doc にまたがる再構成には向かない。その場合は
