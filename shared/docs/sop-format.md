@@ -42,15 +42,18 @@
 
 ## Skills ラッパー（発火の自動化）
 
-共通 SOP は doc 本体（`docs/<name>.md` ＝正本）に加えて、Claude Code / Codex が該当タスクで自動発火
-できる skill ラッパーが同期配布される:
+共通 SOP は doc 本体（`docs/<name>.md` ＝正本）に加えて、各エージェントが該当タスクで自動発火
+できる skill ラッパーが同期配布される（SKILL.md は共通標準形式。中身はどのパスも同一）:
 
-- `.claude/skills/<name>/SKILL.md`（Claude Code が読む）
-- `.codex/skills/<name>/SKILL.md`（Codex が読む。中身は同一）
+- `.claude/skills/<name>/SKILL.md`（Claude Code）
+- `.codex/skills/<name>/SKILL.md`（Codex）
+- `.openhands/skills/<name>/SKILL.md`（OpenHands）
+- `.gemini/skills/<name>/SKILL.md`（Gemini CLI。あわせて `.gemini/settings.json` が
+  AGENTS.md を常時コンテキストとして読む設定を配布している）
 
 ラッパーは「`docs/<name>.md` を読んで従え」の薄いポインタで、frontmatter の `description` が発火トリガ。
 **SKILL.md に手順本体を書かない**（正本は常に `docs/` 側。二重管理にしない）。配布物なので手編集しない
 （直したいときは outbox 提案）。
 
 リポジトリ固有の SOP にも、同じパターンでローカルに skill ラッパーを置いてよい（MAY。本体を `docs/` に置き、
-`.claude/skills/`・`.codex/skills/` にポインタだけ、という分担は共通 SOP と同じにする）。
+各 `.＜agent＞/skills/` にポインタだけ、という分担は共通 SOP と同じにする）。

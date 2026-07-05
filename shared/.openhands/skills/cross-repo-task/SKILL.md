@@ -1,0 +1,1 @@
+../../../.claude/skills/cross-repo-task/SKILL.md
