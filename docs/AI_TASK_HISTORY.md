@@ -5,6 +5,16 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
 
 ---
 
+## 2026-07-05 collect-outbox / sync workflow の Node.js 20 廃止対応
+
+- **なぜ**: `collect-outbox.yml` 実行時に actions/checkout@v4・peter-evans/create-pull-request@v7 が
+  Node20 ランタイム宣言のまま Node24 ランナーへ強制実行される旨の Deprecation Warning が出た
+  （GitHub Actions ランナーの Node20 廃止 2025-09-19 changelog）。両アクションとも Node24 対応版
+  （checkout@v5 / create-pull-request@v8）へ更新して解消。合わせて `sync.yml` 側の
+  actions/checkout@v4・peter-evans/create-pull-request@v6 も同時に上げた（放置すると次に同じ
+  Warning が出る導線だったため）。v8 で `git-token` → `branch-token` にリネームされたが、
+  両 workflow とも `token` 入力しか使っておらず無関係と確認済み。
+
 ## 2026-07-05 手順 doc の SOP 書式規約と skills 配布（Agent SOP 導入）
 
 - **なぜ**: オーナーから「Agent SOP 運用を導入したい」の依頼。評価の結果、外部プロダクト
