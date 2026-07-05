@@ -32,7 +32,7 @@ jobs:
       # git add -A が nested repo を gitlink として拾ってしまう。ai-ops と consumers を
       # workspace 直下の兄弟ディレクトリに分離する。
       - name: Checkout ai-ops
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: ai-ops
 
@@ -74,7 +74,7 @@ jobs:
 
       - name: Open intake PR to ai-ops
         if: steps.collect.outputs.found == 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           path: ai-ops
           token: ${{ secrets.OPS_SYNC_TOKEN }}
@@ -87,7 +87,7 @@ jobs:
 
       - name: Open cleanup PR to consumer (remove processed proposal)
         if: steps.collect.outputs.found == 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           path: ${{ steps.collect.outputs.consumer_dir }}
           token: ${{ secrets.OPS_SYNC_TOKEN }}
