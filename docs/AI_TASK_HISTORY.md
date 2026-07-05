@@ -5,6 +5,24 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
 
 ---
 
+## 2026-07-05 手順 doc の SOP 書式規約と skills 配布（Agent SOP 導入）
+
+- **なぜ**: オーナーから「Agent SOP 運用を導入したい」の依頼。評価の結果、外部プロダクト
+  （AWS Strands Agent SOPs 等）の導入ではなく「既存のオンデマンド層に書式規約＋淘汰ルールを足す」
+  形を採った（MCP 配布層が既存 sync と重複するため。書式の要点 = RFC 2119 制約強度・パラメータ化・
+  ステップごとの完了条件だけ借りる）。オーナーの懸念2点への解: (1) リポジトリ固有 doc へも効かせる →
+  規約 doc 自体を配布し、常時ロード層のトリガを「共通・固有を問わない」と明記＋ nikki-san へ既存
+  ローカル doc の準拠化タスクを起票。(2) Codex 参加 → Codex は 2025-12 から同一の SKILL.md 形式を
+  サポート（読み込みパスだけ `.codex/skills/` と異なる）。
+- **設計判断**: skill ラッパーは `.claude/` 側を正本、`.codex/` 側を symlink にした。`apply-shared.mjs`
+  は `readFileSync` でコピーするため symlink は配布時に実体化され、consumer には両パスに同一の実体
+  ファイルが届く（scratch で実地検証済み）。正本を二重に持たないためのドリフト対策で、張り先は
+  `shared/` 内に限る（設計 doc「前提・限界」に明記）。SKILL.md は「doc を読んで従え」の薄いポインタに
+  限定し、手順本体は常に `docs/` 側（Codex/Claude どちらも読めるプレーン Markdown を正本に保つ）。
+  常時層の AGENTS.md トリガは skills と重複するが残す（skills は発火の補助であって、完了手順のような
+  命令はマーカー区間が正）。「世の中のベストプラクティス自動反映」（外部ソースからの SOP 自動取り込み）
+  は、外部テキストを無レビューでルール正本に注入する増幅経路になるため不採用（オーナー同意済み）。
+
 ## 2026-07-02 タスク履歴の保持を5日分→2作業日分に短縮
 
 - **なぜ**: オーナー指示。常時ロード層（`AI_TASK_HISTORY.md` 本体）は5日分も要らず、直近2日分で足りる。
@@ -48,10 +66,3 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
   force-push で潰し合うため。collect の checkout を `ai-ops/`・`consumers/` の兄弟配置にしたのは、
   consumer clone が ai-ops checkout 内にあると取り込み PR の `git add -A` が nested repo を gitlink として
   拾う潜在バグがあったため。
-
-## 2026-07-01 history.md を AI_TASK_HISTORY.md にリネーム
-
-- **なぜ**: 他リポジトリ（consumer）側の履歴ファイル名と統一するため、`docs/history.md` を
-  `docs/AI_TASK_HISTORY.md` にリネーム。参照元（`AGENTS.md`・`.claude/hooks/check-history.sh`）も
-  合わせて更新した。ai-ops 自身の `.claude/` 開発ツールに関する内部変更なので、Notion ではなく
-  ここに記録する（consumer に配布されるファイルではない）。
