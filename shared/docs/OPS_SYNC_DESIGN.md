@@ -45,6 +45,11 @@
    （本体は常に `docs/` 側。SKILL.md はポインタのみ）。Gemini CLI は既定では AGENTS.md を読まないため、
    `shared/.gemini/settings.json`（`context.fileName` に AGENTS.md を指定）も配布する。
    consumer が Gemini 設定を固有化したくなったら、このファイルは shared/ から外す判断をする。
+   OpenHands は V1 で `.openhands/skills/` を読むが **V0 は読まない**（かつ AGENTS.md も既定では読まない）。
+   そこで、常時ロードされる repo microagent `shared/.openhands/microagents/repo.md` を配布する。中身は
+   「作業前に AGENTS.md を読んで従え／詳細手順は `docs/` 参照」というポインタのみ（ルール本体は書かない）。
+   AGENTS.md 側の常時層に各手順書の発火トリガ＋ポインタがテキストで入っているため、V0 でも
+   AGENTS.md → `docs/<name>.md` の参照で手順書層をカバーできる（skill の自動発火は V1 で効く）。
 3. **共通インフラ（実ファイル）** — 正本 `shared/` 配下に consumer のパスをミラー
    （例: `shared/.github/actions/publish-ci-logs/action.yml`）。同じ相対パスへ配置。
 4. **リポジトリ横断タスク** — 正本 `tasks/<owner>/<repo>/*.md`。**その consumer だけ**の
@@ -128,5 +133,15 @@ consumer: エージェントが .ai-ops/outbox/<時刻>-<説明>.md を main に
 - 提案・タスクの「なぜ」は frontmatter の `理由:` → 取り込み PR 本文 → ai-ops の PR/git 履歴に残る。
   consumer のエージェントから ai-ops の履歴は見えないため、**consumer 側でも将来参照しそうな判断根拠は
   配布 doc（`shared/docs/`）自体に書き込む**こと。
-- Codex は `AGENTS.md`、Claude Code は `CLAUDE.md` を読む。consumer 側で `CLAUDE.md -> AGENTS.md`
-  symlink にすれば両エージェントが同じ AGENTS.md（＝配布される共通ブロック）を読む。
+- エージェントごとに AGENTS.md への入口が違う。**正本は常に `AGENTS.md` 一本**にし、各エージェントを
+  そこへ向ける（内容を各ファイルへ複製しない）:
+  - Codex は `AGENTS.md` をネイティブに読む。
+  - Claude Code は `CLAUDE.md` を読む。consumer 側で `CLAUDE.md -> AGENTS.md` symlink にすれば同じ AGENTS.md を読む。
+  - Gemini CLI は既定 `GEMINI.md` だが、`shared/.gemini/settings.json` の `context.fileName: ["AGENTS.md"]`
+    で AGENTS.md を読ませる（GEMINI.md はリストに入れない＝「GEMINI.md が無い」旨の探索メッセージも出ない）。
+  - OpenHands は V0 だと AGENTS.md も `.openhands/skills/` も読まないため、常時ロードの
+    `.openhands/microagents/repo.md`（ポインタ）から AGENTS.md へ誘導する。V1 は `.openhands/skills/` も読む。
+  なお AGENTS.md を指す symlink（`GEMINI.md`/`CLAUDE.md` → `AGENTS.md`）は **`shared/` 経由で配れない**:
+  `apply-shared.mjs` は symlink を実体化（内容コピー＝凍結）し、かつ AGENTS.md は consumer ごとにマーカー
+  区間が異なる＆ `shared/` の外にあるため、配ると stale なコピーになる。symlink 方式を採るなら各リポジトリ
+  直下での手当て（`CLAUDE.md` と同様）になる。Gemini を settings 方式にしているのはこのため。
