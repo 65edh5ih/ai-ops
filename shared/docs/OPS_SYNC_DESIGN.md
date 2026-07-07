@@ -40,8 +40,9 @@
 2. **特定タスクでのみ要る共通 doc** — 正本 `shared/docs/<name>.md`。consumer の `docs/<name>.md` へ配置。
    常時層からは consumer パス `docs/<name>.md` で参照する。手順系 doc（SOP）は書式規約
    `docs/sop-format.md` に従って書き、`shared/.claude/skills/<name>/SKILL.md`（正本）と
-   各エージェントのミラー（`shared/.codex/skills/`・`shared/.openhands/skills/`・`shared/.gemini/skills/`、
-   いずれも正本への symlink）の薄い skill ラッパーを添えると、各エージェントが該当タスクで自動発火できる
+   各エージェントのミラー（`shared/.codex/skills/`・`shared/.openhands/skills/`・`shared/.gemini/skills/`・
+   `shared/.agents/skills/`〔Antigravity〕、いずれも正本への symlink）の薄い skill ラッパーを添えると、
+   各エージェントが該当タスクで自動発火できる
    （本体は常に `docs/` 側。SKILL.md はポインタのみ）。Gemini CLI に AGENTS.md を読ませる方法は
    「前提・限界」のエージェント別入口を参照（`GEMINI.md -> AGENTS.md` の入口 symlink＝`apply-entrypoints.mjs`）。
    OpenHands は V1 で `.openhands/skills/` を読むが **V0 は読まない**（かつ AGENTS.md も既定では読まない）。
@@ -137,6 +138,13 @@ consumer: エージェントが .ai-ops/outbox/<時刻>-<説明>.md を main に
 - エージェントごとに AGENTS.md への入口が違う。**正本は常に `AGENTS.md` 一本**にし、各エージェントを
   そこへ向ける（内容を各ファイルへ複製しない）:
   - Codex は `AGENTS.md` をネイティブに読む。
+  - Antigravity（Google の agentic IDE）は `AGENTS.md` をネイティブに読む（v1.20.3〔2026-03〕でクロスツール
+    標準 AGENTS.md をサポート）。読み込み優先順は `~/.gemini/GEMINI.md`（global）→ `./GEMINI.md` → `./AGENTS.md`
+    → `./.agent/rules/*.md`。よってルール本体は**追加配線ゼロ**で届く（consumer の `AGENTS.md` を直接読むうえ、
+    Gemini CLI 向けに張ってある `GEMINI.md -> AGENTS.md` 入口 symlink も優先的に拾うため二重に届く）。skill の
+    自動発火は `.agents/skills/<name>/SKILL.md`（description マッチのオンデマンド。公式
+    `antigravity.google/docs/skills`）に対応するので、他エージェントと同じく `.claude/skills/` を正本とする
+    ミラー symlink を `shared/.agents/skills/` にも張って配る。
   - Claude Code は `CLAUDE.md` を読む → `CLAUDE.md -> AGENTS.md` の入口 symlink で同じ AGENTS.md を読む。
   - Gemini CLI は既定で `GEMINI.md` を探す → `GEMINI.md -> AGENTS.md` の入口 symlink で AGENTS.md を読む。
     （`shared/.gemini/settings.json` の `context.fileName` で読ませる案は環境によって効かず〔`/memory show`
