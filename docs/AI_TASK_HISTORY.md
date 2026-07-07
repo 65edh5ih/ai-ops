@@ -20,6 +20,17 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
   実体化＝凍結し、AGENTS.md は consumer ごとにマーカー区間が異なる＆ shared/ 外）ため、settings 方式が正。
   `context.fileName` から "GEMINI.md" を外し `["AGENTS.md"]` のみに（探索対象から外れメッセージが消える／
   AGENTS.md は従来どおり読む）。エージェント別の AGENTS.md 入口の違いを設計 doc「前提・限界」に一覧化した。
+- **訂正（同スレッド follow-up・#31 の想定が誤りだった）**: オーナー環境で `/memory show` が**空**＝
+  `context.fileName` 方式は効いておらず AGENTS.md がロードされていなかった。起動 Tips「Create GEMINI.md
+  files…」は静的でなく **context が空のサイン**（前段で「静的」と説明したのは誤り）。オーナーが実証した
+  とおり、確実に効くのは **`GEMINI.md -> AGENTS.md` symlink**（Gemini 既定の GEMINI.md 探索が拾う）で、
+  `CLAUDE.md` と全く同じ方式。効かない `shared/.gemini/settings.json` は撤去。
+- **設計判断（自動配線への格上げ）**: 入口 symlink は AGENTS.md（consumer ごとに異なる／`shared/` 外）を
+  指すため `shared/` 配布に乗らない（apply-shared が実体化＝凍結）。従来 `CLAUDE.md` は各リポジトリで手動
+  symlink（＝ ai-ops が無くそうとしている手動リレー）だったので、これを機に **`apply-entrypoints.mjs` で
+  sync が `CLAUDE.md`/`GEMINI.md` を自動配線**する形へ格上げ（冪等・実体ファイルは壊さない）。settings で
+  読ませる案を捨てたのは、環境差（settings.json の探索場所・スキーマ差）に依存せず symlink が version 非依存で
+  確実なため。edge ケース（新規・冪等・実体ファイル居座り・別宛先 symlink・AGENTS.md 不在）は scratch で検証。
 
 ## 2026-07-05 SOP 書式準拠化タスクを private にも起票
 

@@ -21,6 +21,7 @@ on:
       - sync-deletions.txt
       - scripts/apply-common.mjs
       - scripts/apply-shared.mjs
+      - scripts/apply-entrypoints.mjs
       - shared/**
       - tasks/**
       - .github/workflows/sync.yml
@@ -75,6 +76,9 @@ jobs:
       - name: Apply common block to consumer AGENTS.md
         run: node scripts/apply-common.mjs AGENTS_COMMON.md consumer/AGENTS.md 2>&1 | tee /tmp/ci-logs/apply-common.log
 
+      - name: Wire agent entrypoints (CLAUDE.md / GEMINI.md -> AGENTS.md)
+        run: node scripts/apply-entrypoints.mjs consumer 2>&1 | tee /tmp/ci-logs/apply-entrypoints.log
+
       - name: Apply shared files / tasks / deletions to consumer
         run: node scripts/apply-shared.mjs . consumer "${{ matrix.consumer }}" 2>&1 | tee /tmp/ci-logs/apply-shared.log
 
@@ -93,6 +97,7 @@ jobs:
             ai-ops（単一の正）に追従して、次を更新します:
 
             - `AGENTS.md` の共通ブロック（`<!-- AI-OPS:COMMON START -->` 〜 `END`）
+            - `CLAUDE.md` / `GEMINI.md` → `AGENTS.md` の入口 symlink（各エージェントに AGENTS.md を読ませる）
             - `shared/` 由来の配布ファイル（`docs/` の共通 doc・composite action 等）
             - このリポジトリ宛のタスク（`.ai-ops/tasks/`）
             - 撤去されたファイルの削除（`.ai-ops/sync-manifest.txt` 基準）
