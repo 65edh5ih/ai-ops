@@ -137,6 +137,14 @@ consumer: エージェントが .ai-ops/outbox/<時刻>-<説明>.md を main に
 - エージェントごとに AGENTS.md への入口が違う。**正本は常に `AGENTS.md` 一本**にし、各エージェントを
   そこへ向ける（内容を各ファイルへ複製しない）:
   - Codex は `AGENTS.md` をネイティブに読む。
+  - Antigravity（Google の agentic IDE）は `AGENTS.md` をネイティブに読む（v1.20.3〔2026-03〕でクロスツール
+    標準 AGENTS.md をサポート）。読み込み優先順は `~/.gemini/GEMINI.md`（global）→ `./GEMINI.md` → `./AGENTS.md`
+    → `./.agent/rules/*.md`。よって**追加配線ゼロ**で対応済み（consumer の `AGENTS.md` を直接読むうえ、Gemini CLI
+    向けに張ってある `GEMINI.md -> AGENTS.md` 入口 symlink も優先的に拾うため二重に届く）。skill の自動発火は
+    `.agents/skills/`（description マッチのオンデマンド）に対応するが、パスを公式 doc で確定できていない
+    （公式 `antigravity.google/docs` が 403）ため skills ミラーは未配布。手順書層は他エージェント同様
+    AGENTS.md 常時層のトリガ → `docs/<name>.md` 参照でカバーする。パス確定後に `.agents/skills/` ミラーを足せば
+    自動発火も効く。
   - Claude Code は `CLAUDE.md` を読む → `CLAUDE.md -> AGENTS.md` の入口 symlink で同じ AGENTS.md を読む。
   - Gemini CLI は既定で `GEMINI.md` を探す → `GEMINI.md -> AGENTS.md` の入口 symlink で AGENTS.md を読む。
     （`shared/.gemini/settings.json` の `context.fileName` で読ませる案は環境によって効かず〔`/memory show`

@@ -5,6 +5,22 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
 
 ---
 
+## 2026-07-07 Antigravity 対応（追加配線ゼロ・doc 記録のみ）
+
+- **なぜ**: オーナーから「Antigravity にも対応できるか」。調査の結果、Antigravity（Google の agentic IDE）は
+  v1.20.3〔2026-03〕でクロスツール標準 **AGENTS.md をネイティブに読む**ようになっており、Codex と同類。
+  ai-ops は既に正本 `AGENTS.md` を全 consumer へ配布済みで、さらに Gemini CLI 向けの `GEMINI.md -> AGENTS.md`
+  入口 symlink も Antigravity が優先的に拾う（読み込み優先順 `~/.gemini/GEMINI.md` → `./GEMINI.md` →
+  `./AGENTS.md`）。したがって**コード変更・新規配布物ゼロで対応済み**であり、設計 doc の入口一覧と README に
+  記録するだけにとどめた（実装と設計を乖離させない完了手順に沿う）。
+- **設計判断（skills ミラーを今回入れない理由）**: Antigravity は `.agents/skills/` の description マッチで
+  オンデマンド skill を自動発火するが、(1) 公式 doc（`antigravity.google/docs`）が 403 で正確なパスを確定
+  できず、サードパーティ記事は `.agent/rules/`（rules は単数）と `.agents/skills/`（skills は複数）で表記が
+  割れている。誤ったパスへ skills を配ると全 consumer に dead file が残りドリフト源になる（ai-ops が排除
+  したい状態そのもの）。(2) 手順書層は他エージェント同様 AGENTS.md 常時層のトリガ → `docs/` 参照で既に
+  カバーされ、skill 自動発火は必須でない。よってパス確定後に `.agents/skills/` ミラーを足す方針だけ doc に
+  残し、今回は配らない。
+
 ## 2026-07-07 GitHub Copilot / Continue への共通ルール適用
 
 - **なぜ**: オーナーから「Codex/Claude/Gemini/OpenHands に加え Copilot、さらに Continue にも同じルールを

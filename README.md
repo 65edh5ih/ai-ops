@@ -1,6 +1,6 @@
 # ai-ops
 
-AIエージェント（Codex / Claude Code / Gemini CLI / OpenHands / GitHub Copilot / Continue）向けの
+AIエージェント（Codex / Claude Code / Gemini CLI / OpenHands / GitHub Copilot / Continue / Antigravity）向けの
 **全リポジトリ共通の運用ルール・共通インフラ・
 リポジトリ横断タスクの単一の正（source of truth）**。ここで1回直せば、CI が各 consumer リポジトリへ
 同期PRを自動生成する（設定により自動マージまで）。手動リレー（外部ツールへのコピペ等）を不要にするのが目的。
@@ -22,6 +22,8 @@ AIエージェント（Codex / Claude Code / Gemini CLI / OpenHands / GitHub Cop
 既定で読まないため、`shared/.openhands/microagents/repo.md`（AGENTS.md へのポインタ）で誘導する。
 GitHub Copilot（`.github/copilot-instructions.md`）・Continue（`.continue/rules/ai-ops.md`）も同様に、
 `shared/` 配布の固定内容ポインタから AGENTS.md へ誘導する（入口が実ファイルなので symlink 配線は不要）。
+Antigravity は `AGENTS.md` をネイティブに読む（かつ `GEMINI.md` 入口 symlink も拾う）ため、**追加配線なしで
+対応済み**（詳細は `shared/docs/OPS_SYNC_DESIGN.md`「前提・限界」のエージェント別入口一覧）。
 
 ## 構成
 
