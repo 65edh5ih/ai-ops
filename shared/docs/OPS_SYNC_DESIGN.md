@@ -144,6 +144,14 @@ consumer: エージェントが .ai-ops/outbox/<時刻>-<説明>.md を main に
     symlink がロードされれば消える。）
   - OpenHands は V0 だと AGENTS.md も `.openhands/skills/` も読まないため、常時ロードの
     `.openhands/microagents/repo.md`（ポインタ）から AGENTS.md へ誘導する。V1 は `.openhands/skills/` も読む。
+  - GitHub Copilot は既定で `.github/copilot-instructions.md`（リポジトリ全体のカスタム指示）を常時読む →
+    その固定内容ポインタから AGENTS.md へ誘導する（`shared/.github/copilot-instructions.md`）。
+  - Continue は `.continue/rules/*.md`（frontmatter `alwaysApply: true` で常時適用）を読む →
+    その固定内容ポインタから AGENTS.md へ誘導する（`shared/.continue/rules/ai-ops.md`）。
+  Copilot / Continue は入口が**固定内容の実ファイル**（consumer 非依存・`shared/` の中に置ける）なので、
+  `CLAUDE.md`/`GEMINI.md` のような入口 symlink（`apply-entrypoints.mjs`）ではなく `apply-shared.mjs` の
+  通常配布で届く。両者とも skill の自動発火機構が無いため、手順書層は OpenHands V0 と同じく
+  AGENTS.md 常時層のトリガ → `docs/<name>.md` 参照でカバーする（ポインタには本体を書かない）。
   `GEMINI.md`/`CLAUDE.md` → `AGENTS.md` の入口 symlink は **`shared/` 経由で配れない**（`apply-shared.mjs` は
   symlink を実体化＝凍結し、かつ AGENTS.md は consumer ごとにマーカー区間が異なる＆ `shared/` の外）。
   そこで **`apply-entrypoints.mjs`** が各 consumer の checkout 内に直接 symlink を張る（sync.yml の1ステップ。
