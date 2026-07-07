@@ -47,9 +47,9 @@
 
 - `.claude/skills/<name>/SKILL.md`（Claude Code）
 - `.codex/skills/<name>/SKILL.md`（Codex）
-- `.openhands/skills/<name>/SKILL.md`（OpenHands）
-- `.gemini/skills/<name>/SKILL.md`（Gemini CLI。あわせて `.gemini/settings.json` が
-  AGENTS.md を常時コンテキストとして読む設定を配布している）
+- `.openhands/skills/<name>/SKILL.md`（OpenHands V1）
+- `.gemini/skills/<name>/SKILL.md`（Gemini CLI。AGENTS.md 本体は `GEMINI.md -> AGENTS.md` 入口 symlink で読む）
+- `.agents/skills/<name>/SKILL.md`（Antigravity）
 
 ラッパーは「`docs/<name>.md` を読んで従え」の薄いポインタで、frontmatter の `description` が発火トリガ。
 **SKILL.md に手順本体を書かない**（正本は常に `docs/` 側。二重管理にしない）。配布物なので手編集しない

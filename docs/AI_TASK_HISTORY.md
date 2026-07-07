@@ -5,21 +5,24 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
 
 ---
 
-## 2026-07-07 Antigravity 対応（追加配線ゼロ・doc 記録のみ）
+## 2026-07-07 Antigravity 対応（ルールは配線ゼロ＋ skills ミラー追加）
 
 - **なぜ**: オーナーから「Antigravity にも対応できるか」。調査の結果、Antigravity（Google の agentic IDE）は
   v1.20.3〔2026-03〕でクロスツール標準 **AGENTS.md をネイティブに読む**ようになっており、Codex と同類。
   ai-ops は既に正本 `AGENTS.md` を全 consumer へ配布済みで、さらに Gemini CLI 向けの `GEMINI.md -> AGENTS.md`
   入口 symlink も Antigravity が優先的に拾う（読み込み優先順 `~/.gemini/GEMINI.md` → `./GEMINI.md` →
-  `./AGENTS.md`）。したがって**コード変更・新規配布物ゼロで対応済み**であり、設計 doc の入口一覧と README に
-  記録するだけにとどめた（実装と設計を乖離させない完了手順に沿う）。
-- **設計判断（skills ミラーを今回入れない理由）**: Antigravity は `.agents/skills/` の description マッチで
-  オンデマンド skill を自動発火するが、(1) 公式 doc（`antigravity.google/docs`）が 403 で正確なパスを確定
-  できず、サードパーティ記事は `.agent/rules/`（rules は単数）と `.agents/skills/`（skills は複数）で表記が
-  割れている。誤ったパスへ skills を配ると全 consumer に dead file が残りドリフト源になる（ai-ops が排除
-  したい状態そのもの）。(2) 手順書層は他エージェント同様 AGENTS.md 常時層のトリガ → `docs/` 参照で既に
-  カバーされ、skill 自動発火は必須でない。よってパス確定後に `.agents/skills/` ミラーを足す方針だけ doc に
-  残し、今回は配らない。
+  `./AGENTS.md`）。したがって**ルール本体はコード変更・新規配布物ゼロで対応済み**。設計 doc の入口一覧と
+  README に記録した（実装と設計を乖離させない完了手順に沿う）。
+- **skills ミラー追加**: 当初は skills 自動発火用ミラーの配布を見送っていた（公式 doc `antigravity.google/docs`
+  が 403 で、`.agent/rules/`〔単数〕と `.agents/skills/`〔複数〕の表記揺れがあり、誤パスへ配ると全 consumer に
+  dead file が残るため）。オーナーが公式 `antigravity.google/docs/skills` を提示し、正しいパスが
+  **`.agents/skills/<name>/SKILL.md`**（frontmatter `description` でオンデマンド発火）と確定。他エージェントと
+  同じ「`.claude/skills/` を正本、各エージェントは symlink ミラー」方式で `shared/.agents/skills/` を追加した
+  （apply-shared が配布時に実体化。scratch consumer で実配置を検証済み）。SKILL.md 形式は共通標準（frontmatter
+  ＋薄いポインタ）で Antigravity にそのまま適合。
+- **ついでの訂正**: `shared/docs/sop-format.md` の skill ラッパー一覧が、撤去済みの `.gemini/settings.json`
+  方式（#31 follow-up で `GEMINI.md -> AGENTS.md` symlink に一本化）を参照したままだったので、この機に
+  現行方式へ修正し `.agents/skills/`（Antigravity）を追記した。
 
 ## 2026-07-07 GitHub Copilot / Continue への共通ルール適用
 
