@@ -5,6 +5,22 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
 
 ---
 
+## 2026-07-07 GitHub Copilot / Continue への共通ルール適用
+
+- **なぜ**: オーナーから「Codex/Claude/Gemini/OpenHands に加え Copilot、さらに Continue にも同じルールを
+  効かせたい」の依頼。設計の非依存原則（正本は `AGENTS.md` 一本、各エージェントはそこへ向けるだけ）に
+  そのまま乗る。両者とも入口が**固定内容の実ファイル**（consumer 非依存・`shared/` 内に置ける）である点が
+  `CLAUDE.md`/`GEMINI.md`（consumer ごとに異なる AGENTS.md を指す symlink＝`apply-entrypoints.mjs` 配線が必要）
+  と決定的に違う。よって OpenHands の repo.md と同じポインタ方式にし、`shared/.github/copilot-instructions.md`・
+  `shared/.continue/rules/ai-ops.md` として `apply-shared.mjs` の通常配布に乗せた（スクリプト改修ゼロ）。
+- **設計判断**: Copilot の入口は `.github/copilot-instructions.md`（全サーフェスで確実に常時ロードされる
+  リポジトリカスタム指示。coding agent は AGENTS.md も読み始めているが、VS Code 等も含め堅牢なのは前者）。
+  Continue の入口は `.continue/rules/*.md` に frontmatter `alwaysApply: true`（no-frontmatter でも常時だが、
+  意図を明示するため付与）。両者とも skill の自動発火機構が無いため、手順書層は OpenHands V0 と同じく
+  AGENTS.md 常時層のトリガ→`docs/<name>.md` 参照でカバーする（ポインタにはルール本体を書かない＝
+  AGENTS.md 一本化を維持）。consumer は既存の `.github/copilot-instructions.md` を持っていれば
+  ai-ops 管理へ移る（他の shared ファイルと同じ所有権移管。新規ポインタなので実害は想定薄）。
+
 ## 2026-07-07 OpenHands V0 の AGENTS.md 読み込み対応・Gemini settings のノイズ除去
 
 - **なぜ**: オーナーから「OpenHands が AGENTS.md を読まない」報告。構築版は V0 で、V0 は
