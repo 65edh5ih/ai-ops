@@ -5,6 +5,22 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
 
 ---
 
+## 2026-07-07 OpenHands V0 の AGENTS.md 読み込み対応・Gemini settings のノイズ除去
+
+- **なぜ**: オーナーから「OpenHands が AGENTS.md を読まない」報告。構築版は V0 で、V0 は
+  `.openhands/skills/`（V1 のみ）も AGENTS.md も既定で読まない。2026-07-05 の履歴には
+  「OpenHands は AGENTS.md をネイティブに読むので設定ファイル不要」と記していたが、これは V1 前提の
+  誤認だった（V0 で外れた）。V0 が常時ロードするのは repo microagent `.openhands/microagents/repo.md`
+  なので、これを「AGENTS.md を読め／詳細は docs/ 参照」のポインタとして配布（ルール本体は書かず
+  AGENTS.md 一本化を維持）。AGENTS.md の常時層に手順書の発火トリガ＋ポインタがテキストで入っているため、
+  skill 自動発火が効かない V0 でも AGENTS.md→docs/ の参照で手順書層をカバーできる。
+  `.openhands/skills/` は V1 用に前方互換で残置（symlink＝保守コスト無し）。
+- **設計判断**: Gemini の「GEMINI.md がない」メッセージはオーナー確認のうえ settings で解決（symlink 不採用）。
+  `GEMINI.md`/`CLAUDE.md`→`AGENTS.md` の symlink は `shared/` 配布に乗らない（apply-shared が symlink を
+  実体化＝凍結し、AGENTS.md は consumer ごとにマーカー区間が異なる＆ shared/ 外）ため、settings 方式が正。
+  `context.fileName` から "GEMINI.md" を外し `["AGENTS.md"]` のみに（探索対象から外れメッセージが消える／
+  AGENTS.md は従来どおり読む）。エージェント別の AGENTS.md 入口の違いを設計 doc「前提・限界」に一覧化した。
+
 ## 2026-07-05 SOP 書式準拠化タスクを private にも起票
 
 - **なぜ**: nikki-san に出していた「ローカル手順 doc を `docs/sop-format.md` に準拠させる」依頼
@@ -65,47 +81,3 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
   常時層の AGENTS.md トリガは skills と重複するが残す（skills は発火の補助であって、完了手順のような
   命令はマーカー区間が正）。「世の中のベストプラクティス自動反映」（外部ソースからの SOP 自動取り込み）
   は、外部テキストを無レビューでルール正本に注入する増幅経路になるため不採用（オーナー同意済み）。
-
-## 2026-07-02 タスク履歴の保持を5日分→2作業日分に短縮
-
-- **なぜ**: オーナー指示。常時ロード層（`AI_TASK_HISTORY.md` 本体）は5日分も要らず、直近2日分で足りる。
-  「2日」は暦日でなく**エントリのある日付＝作業日**で数える（おととい作業・昨日休み・今日作業なら、
-  今日とおとといの2日分を残す）。元の規約も日付カウントだったので数字の変更だが、誤読防止に
-  「暦日ではなく作業日」を規約に明記した。超過判定は 6日分→3日分に連動。
-- consumer 側の既存履歴の掃除タスクは起票しない: 規約上「超過させた当のセッションが完了手順で移す」
-  ため、配布後の次回追記時に各リポジトリで自然に3日分以上→アーカイブが走る。
-
-## 2026-07-02 タスク履歴の規約を共通化（`task-history.md` 新設）
-
-- **なぜ**: 履歴の運用規約（ファイル名・エントリ単位・アーカイブ）を各リポジトリの固有パートに
-  委ねていたため、ファイル名の不統一と保持ルールの分岐が起きていた。「全リポジトリで同一内容が
-  要るものは ai-ops が正本」という自身の振り分けルールに反していたので、規約を `shared/docs/task-history.md`
-  として配布し、共通ブロックに読み取りトリガ（「さっきのあれ」照合）と完了手順のポインタを追記。
-- **設計判断**: 保持は「直近5件」でなく「エントリのある日付で直近5日分」（private で運用されていた
-  日単位カウントを採用）。短期記憶の必要量は件数でなく経過時間で決まり、細かい作業が多い日に
-  毎回アーカイブが走らない実利もあるため。履歴の目的は (1) スレッド間の短期記憶 (2) 判断根拠の
-  恒久保管、と規約に明文化した（オーナー確認済み）。既存履歴の移行は新設のタスク機構で両 consumer に
-  起票（`tasks/65edh5ih/{nikki-san,private}/2026-07-02T050000-unify-task-history.md`）。タスク機構の
-  初回実地テストを兼ねる。
-
-## 2026-07-02 上りを cron 化・削除伝播とタスク配布を追加・Notion 依存を撤去
-
-- **なぜ**: オーナーから「この仕組みはベストプラクティスか」とゼロベース評価を求められ、次の問題を確認した。
-  (1) 上りの `repository_dispatch` は各 consumer に ai-ops への Contents:RW PAT（`OPS_DISPATCH_TOKEN`）を
-  要求し、「consumer が1つ侵害されると全リポジトリへルールを注入できる」増幅経路だった。ルール訂正に
-  即時性は不要なので cron ポーリング（6時間ごと＋手動）に変更し、consumer 側の workflow・Secret を全廃。
-  (2) `apply-shared.mjs` は追加・更新しかできず、shared/ から撤去したファイルが consumer に残留する
-  ドリフトがあった → 配布一覧を consumer の `.ai-ops/sync-manifest.txt` に記録し、差分で削除を伝播。
-  manifest 導入前の unmanaged ファイル（`notify-ai-ops.yml` 等）は `sync-deletions.txt` で撤去。
-  (3) `common-block-edit` は全文置換のため、古い版ベースの提案で新しい変更が黙って巻き戻る lost update が
-  あった → frontmatter `ベース:`（ブロックの sha256 先頭12桁）で鮮度検査し、不一致は PR タイトルで警告。
-  (4) Notion「AI Cross-Repo Task Log」への依存（横断タスク依頼・履歴）を ai-ops に吸収: 依頼は
-  `tasks/<owner>/<repo>/` → sync で対象の `.ai-ops/tasks/` へ配布（outbox `種別: task` / `task-done` で
-  consumer 起点の起票・消化も可能）。履歴は提案 frontmatter の `理由:` が取り込み PR 本文に残る形にし、
-  このファイルを ai-ops の唯一の履歴とした。
-- **設計判断**: 同期 PR は「内容レビューは ai-ops マージ時に済んでいる」ため自動マージしてよい
-  （`sync.yml` の `MERGE_MODE`。既定 `auto`、consumer 側に required checks が無ければ手動のまま）。
-  取り込み PR のブランチ名を提案ごとに変えたのは、先行 PR が open のまま次を処理すると固定ブランチ名では
-  force-push で潰し合うため。collect の checkout を `ai-ops/`・`consumers/` の兄弟配置にしたのは、
-  consumer clone が ai-ops checkout 内にあると取り込み PR の `git add -A` が nested repo を gitlink として
-  拾う潜在バグがあったため。
