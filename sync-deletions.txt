@@ -3,5 +3,3 @@
 # ファイルの撤去用。manifest 管理下のファイルは shared/ から消せば自動で削除が伝播する
 # ので、ここに書く必要はない。全 consumer で削除が済んだ行は、collect workflow の
 # 保守バッチ（scripts/prune-tombstones.mjs）が自動で刈る（手で消さなくてよい）。
-.github/workflows/notify-ai-ops.yml
-docs/cross-repo-history.md
