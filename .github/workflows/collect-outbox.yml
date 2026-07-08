@@ -1,13 +1,18 @@
 name: Collect outbox proposals from consumers
 
-# consumer → ai-ops の「上り」。各 consumer の .ai-ops/outbox/*.md を1件拾い、
-# 種別に応じて処理する:
+# consumer → ai-ops の「上り」。最古の提案を持つ consumer の .ai-ops/outbox/*.md を
+# まとめて拾い、種別に応じて処理する:
 #   - common-block-edit : AGENTS_COMMON.md への取り込み PR を生成
 #   - shared-file       : shared/<対象パス> への配置 PR を生成
 #   - task              : tasks/<対象リポジトリ>/ への登録 PR を生成
 #   - task-done         : tasks/<提案元>/<対象ファイル> の削除 PR を生成
-# いずれも ai-ops 側の取り込み PR と consumer 側の cleanup PR の 2 本を自動生成。
-# マージは人間（オーナー）が行う。
+# ai-ops 側の取り込み PR（全提案まとめて1本）と consumer 側の cleanup PR の 2 本を自動生成。
+# 取り込み PR のマージは人間（オーナー）が行う。不正な提案は .ai-ops/outbox/rejected/ へ
+# エラーノート付きで差し戻す（キューを塞がない）。同一実行内で衝突する提案（2件目の
+# common-block-edit 等）と他 consumer の提案は次回実行に回る。
+#
+# あわせて保守バッチとして、この run で clone した consumer を使い sync-deletions.txt の
+# 役目を終えたトゥームストーン（全 consumer から対象ファイルが消えた行）を自動で刈る。
 #
 # トリガーは cron ポーリング＋手動。以前は consumer からの repository_dispatch（即時）
 # だったが、そのために各 consumer へ ai-ops に Contents:RW できる PAT を置く必要があり、
@@ -58,9 +63,10 @@ jobs:
           done < <(grep -vE '^[[:space:]]*(#|$)' ai-ops/consumers.txt)
 
       - id: collect
-        name: Apply one proposal
+        name: Apply proposals (one consumer per run)
         env:
           PR_BODY_PATH: ${{ runner.temp }}/pr-body.md
+          CLEANUP_BODY_PATH: ${{ runner.temp }}/cleanup-body.md
         run: node ai-ops/scripts/collect-outbox.mjs ai-ops/AGENTS_COMMON.md consumers ai-ops 2>&1 | tee /tmp/ci-logs/collect-outbox.log
 
       - name: Record collect result
@@ -69,7 +75,8 @@ jobs:
           echo "- Found: ${{ steps.collect.outputs.found }}" >> /tmp/ci-logs/summary.md
           echo "- Type: ${{ steps.collect.outputs.type }}" >> /tmp/ci-logs/summary.md
           echo "- Consumer: ${{ steps.collect.outputs.consumer }}" >> /tmp/ci-logs/summary.md
-          echo "- Proposal: ${{ steps.collect.outputs.proposal }}" >> /tmp/ci-logs/summary.md
+          echo "- Proposals: ${{ steps.collect.outputs.proposal }}" >> /tmp/ci-logs/summary.md
+          echo "- Applied/Rejected/Deferred: ${{ steps.collect.outputs.applied }}/${{ steps.collect.outputs.rejected }}/${{ steps.collect.outputs.deferred }}" >> /tmp/ci-logs/summary.md
           echo "- Finished: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> /tmp/ci-logs/summary.md
 
       - name: Open intake PR to ai-ops
@@ -85,8 +92,8 @@ jobs:
           title: ${{ steps.collect.outputs.pr_title }}
           body-path: ${{ runner.temp }}/pr-body.md
 
-      - name: Open cleanup PR to consumer (remove processed proposal)
-        if: steps.collect.outputs.found == 'true'
+      - name: Open cleanup PR to consumer (remove/reject processed proposals)
+        if: steps.collect.outputs.consumer_changed == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
           path: ${{ steps.collect.outputs.consumer_dir }}
@@ -94,13 +101,43 @@ jobs:
           base: main
           branch: ${{ steps.collect.outputs.cleanup_branch }}
           delete-branch: true
-          commit-message: 'chore: 取り込み済みの ai-ops 提案を outbox から削除'
-          title: 'chore: 取り込み済みの ai-ops 提案を outbox から削除 (${{ steps.collect.outputs.proposal }})'
-          body: |
-            この提案は ai-ops 側で取り込み PR を作成済みです。outbox から削除します。
-            （取り込み PR を close した場合は、この cleanup PR も close してください。提案内容は取り込み PR の差分に残っています。）
+          commit-message: 'chore: ai-ops が処理した提案を outbox から整理'
+          title: ${{ steps.collect.outputs.cleanup_title }}
+          body-path: ${{ runner.temp }}/cleanup-body.md
 
-            後続の提案は、この cleanup PR がマージされた後の collect 実行で順に処理されます。
+      # ── 保守バッチ: 役目を終えたトゥームストーンの掃除 ─────────────────────────
+      # 上の collect が ai-ops チェックアウトを取り込み PR 用に書き換えるため、
+      # 掃除は別チェックアウトで行い、独立した PR にする（機械的削除なので自動マージ）。
+      - name: Checkout ai-ops (tombstone prune)
+        uses: actions/checkout@v5
+        with:
+          path: ai-ops-prune
+
+      - name: Prune completed tombstones from sync-deletions.txt
+        run: node ai-ops/scripts/prune-tombstones.mjs ai-ops-prune consumers 2>&1 | tee /tmp/ci-logs/prune-tombstones.log
+
+      - name: Open tombstone prune PR
+        id: prune-pr
+        uses: peter-evans/create-pull-request@v8
+        with:
+          path: ai-ops-prune
+          token: ${{ secrets.OPS_SYNC_TOKEN }}
+          base: main
+          branch: ai-ops/prune-tombstones
+          delete-branch: true
+          commit-message: 'chore: 全 consumer で削除済みのトゥームストーンを整理'
+          title: 'chore: sync-deletions.txt の役目を終えた行を整理'
+          body: |
+            `sync-deletions.txt` のうち、全 consumer の main に対象ファイルがもう存在しない行を削ります
+            （collect workflow の保守バッチが自動生成。判定はこの run で clone した各 consumer の main に対して行いました）。
+
+      - name: Merge tombstone prune PR
+        if: steps.prune-pr.outputs.pull-request-url != ''
+        env:
+          GH_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
+        run: |
+          gh pr merge --squash "${{ steps.prune-pr.outputs.pull-request-url }}" \
+            || echo "::warning::merge failed; PR left open: ${{ steps.prune-pr.outputs.pull-request-url }}"
 
       - name: Publish CI logs
         if: always()

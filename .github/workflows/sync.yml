@@ -2,6 +2,11 @@ name: Sync common rules to consumers
 
 # AGENTS_COMMON.md / shared/** / tasks/** / sync-deletions.txt / 配布スクリプトを変更して
 # main に入ると、各 consumer へ同期PRを自動生成する。
+#
+# あわせて cron（1日1回）でも全 consumer へ再適用する（ドリフトの自己修復）。
+# push 起点だけだと、consumer 側でマーカー区間や配布ファイルが手編集された場合に
+# 「次に ai-ops を変更するまで」ドリフトが残り続ける（エージェントが古い/改変された
+# ルールを読んで従ってしまう）。適用スクリプトは冪等で、差分が無ければ PR は立たない。
 # 既定の GITHUB_TOKEN は他リポジトリに書けないため、複数リポジトリ権限の PAT を
 # Secret OPS_SYNC_TOKEN（Contents: RW / Pull requests: RW）で渡すこと。
 #
@@ -25,6 +30,8 @@ on:
       - shared/**
       - tasks/**
       - .github/workflows/sync.yml
+  schedule:
+    - cron: '47 19 * * *' # 1日1回（JST 早朝）の再適用＝consumer 側手編集ドリフトの自己修復
   workflow_dispatch:
 
 env:
