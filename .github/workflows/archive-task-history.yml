@@ -1,0 +1,114 @@
+name: Archive task histories
+
+# 各リポジトリの docs/AI_TASK_HISTORY.md の保持量超過分（直近2作業日分を超えた古い日付の
+# エントリ。規約: shared/docs/task-history.md）を docs/history-archive/<YYYY>.md へ移す
+# 集中バッチ。ai-ops 自身と全 consumer を1日1回巡回し、超過があるリポジトリにだけ
+# アーカイブ PR を生成する（無ければ何もしない）。
+#
+# アーカイブは決定的なファイル移動なので、エージェントのセッション（完了手順）ではなく
+# ここで一括処理する。consumer 側に workflow・Secret を置かない原則（OPS_SYNC_DESIGN.md）は
+# 変えない: 実行主体はこの workflow だけで、consumer へは何も配布しない。
+#
+# MERGE_MODE の意味は sync.yml と同じ（アーカイブは機械的移動なので再レビュー不要という設計）。
+
+on:
+  schedule:
+    - cron: '17 20 * * *' # 1日1回（JST 早朝）。超過は翌朝までに掃除されれば足りる
+  workflow_dispatch:
+
+env:
+  MERGE_MODE: direct
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      repos: ${{ steps.read.outputs.list }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: read
+        # ai-ops 自身＋consumers.txt（# と空行を除く）を JSON 配列にしてマトリクスへ渡す
+        run: |
+          list=$({ echo "${{ github.repository }}"; grep -vE '^[[:space:]]*(#|$)' consumers.txt; } | jq -R . | jq -cs .)
+          echo "list=$list" >> "$GITHUB_OUTPUT"
+
+  archive:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJson(needs.prepare.outputs.repos) }}
+    steps:
+      - name: Checkout ai-ops (script source)
+        uses: actions/checkout@v5
+
+      - name: Checkout target repo
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ matrix.repo }}
+          token: ${{ secrets.OPS_SYNC_TOKEN }}
+          path: target
+
+      - name: Set up log directory
+        run: |
+          mkdir -p /tmp/ci-logs
+          cat > /tmp/ci-logs/summary.md << EOF
+          # Archive task history: ${{ matrix.repo }}
+          - Run: ${{ github.run_id }}
+          - Triggered by: ${{ github.event_name }}
+          - Started: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          EOF
+
+      - name: Move overflow entries to archive
+        run: node scripts/archive-task-history.mjs target 2>&1 | tee /tmp/ci-logs/archive.log
+
+      - name: Create or update archive PR
+        id: create-pr
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.OPS_SYNC_TOKEN }}
+          path: target
+          base: main
+          branch: ai-ops/archive-task-history
+          delete-branch: true
+          commit-message: 'chore: archive old task history entries'
+          title: 'chore: タスク履歴の古いエントリをアーカイブ'
+          body: |
+            `docs/AI_TASK_HISTORY.md` の保持量（直近2作業日分。規約: `docs/task-history.md`）を
+            超えた古い日付のエントリを `docs/history-archive/` へ移します（本文はそのまま・移動のみ）。
+
+            この PR は ai-ops の archive-task-history workflow（1日1回の集中バッチ）が自動生成しました。
+
+      - name: Merge archive PR (per MERGE_MODE)
+        if: env.MERGE_MODE != 'off' && steps.create-pr.outputs.pull-request-url != ''
+        env:
+          GH_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
+        run: |
+          url="${{ steps.create-pr.outputs.pull-request-url }}"
+          if [ "$MERGE_MODE" = "direct" ]; then
+            gh pr merge --squash "$url" \
+              || echo "::warning::direct merge failed; PR left open: $url"
+          else
+            gh pr merge --auto --squash "$url" \
+              || echo "::warning::auto-merge could not be enabled; PR left open: $url"
+          fi
+
+      - name: Record PR result
+        if: always()
+        run: |
+          echo "- PR URL: ${{ steps.create-pr.outputs.pull-request-url }}" >> /tmp/ci-logs/summary.md
+          echo "- Merge mode: ${MERGE_MODE}" >> /tmp/ci-logs/summary.md
+          echo "- Finished: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> /tmp/ci-logs/summary.md
+
+      - name: Publish CI logs
+        if: always()
+        uses: ./.github/actions/publish-ci-logs
+        with:
+          source-dir: /tmp/ci-logs
+          dest: archive-task-history/${{ matrix.repo }}/latest
+          history-dir: archive-task-history/${{ matrix.repo }}/history
+          retention-days: "30"
+          run-id: ${{ github.run_id }}
+          commit-message: "ci-logs: archive-task-history ${{ matrix.repo }} (run ${{ github.run_id }})"
+          token: ${{ secrets.OPS_SYNC_TOKEN }}

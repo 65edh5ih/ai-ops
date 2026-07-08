@@ -55,7 +55,7 @@ URL を推測で組み立てたときはその旨を添える。
 
 - 「さっきの◯◯」「昨日のあれ」など**過去スレッドの文脈が前提の依頼**は、まず
   `docs/AI_TASK_HISTORY.md`（直近2作業日分のエントリ）を読む。より古い経緯は `docs/history-archive/` を grep。
-- 書き方・アーカイブの規約は [`docs/task-history.md`](docs/task-history.md)（追記する直前に読む）。
+- 書き方の規約は [`docs/task-history.md`](docs/task-history.md)（追記する直前に読む）。
 
 ## ブランチ・PR の規律
 
@@ -67,8 +67,8 @@ URL を推測で組み立てたときはその旨を添える。
 
 ## 作業完了時の必須手順（ユーザーへの完了報告より前に・促される前に自分から）
 
-1. `docs/AI_TASK_HISTORY.md` に「**なぜ**」を1エントリ追記し、3日分以上になっていたら古い日付分を
-   アーカイブへ移す（規約: [`docs/task-history.md`](docs/task-history.md)）。
+1. `docs/AI_TASK_HISTORY.md` に「**なぜ**」を1エントリ追記する（規約:
+   [`docs/task-history.md`](docs/task-history.md)。アーカイブは ai-ops の自動バッチが行うので手を出さない）。
 2. 作業中に実証で誤り・不足と分かったドキュメントをその場で正す（配布 doc なら outbox 提案で。
    黙って回避策で済ませない）。
 
