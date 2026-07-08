@@ -1,1 +1,0 @@
-../../../.claude/skills/outbox-proposal/SKILL.md

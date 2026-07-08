@@ -31,8 +31,9 @@
   `AGENTS_COMMON.md` 側には「発火トリガ＋ポインタ」だけ残し、詳細手順はこちらへ逃がす。参照は **consumer パス
   `docs/<name>.md`** で書く（埋め込まれた先＝consumer で読まれるため）。例: `cross-repo-tasks.md` /
   `outbox-proposal.md` / `ci-logs.md`。手順系 doc（SOP）は書式規約 `shared/docs/sop-format.md` に従い、
-  skill ラッパー `shared/.claude/skills/<name>/SKILL.md`（正本）＋ 各エージェントのミラー symlink
-  （`.codex` / `.openhands` / `.gemini` / `.agents`）を添える（→ OPS_SYNC_DESIGN.md「配布物の三層＋タスク」）。
+  skill ラッパー `shared/.claude/skills/<name>/SKILL.md` を添える。各エージェント向けのミラー
+  （`.codex` / `.openhands` / `.gemini` / `.agents`）は `apply-shared.mjs` が配布時に正本から自動生成する
+  ので**置かない**（→ OPS_SYNC_DESIGN.md「配布物の三層＋タスク」）。
 - **バイト一致であるべき実ファイル**（composite action・共有スクリプト等）→ `shared/` に consumer のパスをミラーして配置。
 - **特定リポジトリ宛の作業依頼** → `tasks/<owner>/<repo>/`（共通化するものではなく、届けるもの）。
 

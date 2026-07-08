@@ -2,6 +2,12 @@
 //   - shared/<path>              → <consumer>/<path>（ディレクトリ構造を維持してコピー）
 //   - tasks/<owner>/<repo>/<f>   → <consumer>/.ai-ops/tasks/<f>（その consumer 宛のタスクのみ）
 //
+// skill ミラーの自動導出: 正本 shared/.claude/skills/** は、各エージェント向けの
+// .codex/.openhands/.gemini/.agents の skills/ にも同内容で配布する（配布時に導出）。
+// 以前は ai-ops 側に symlink を1エージェントぶんずつ手で置いていたが、完全に機械的な複製で
+// 張り忘れのドリフト源だったため、リポジトリには正本だけを置く方式に変えた。
+// 新エージェント対応は SKILL_MIRROR_ROOTS への追加1行。
+//
 // 配布したファイル一覧を consumer の .ai-ops/sync-manifest.txt に記録し、
 // **前回 manifest にあって今回の配布物に無いパスは削除する**（shared/ での撤去・改名や
 // タスク消化を consumer へ伝播させる。旧実装は追加・更新しかできず、消したファイルが
@@ -15,6 +21,10 @@ import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, rmSync
 import path from 'node:path';
 
 const MANIFEST = '.ai-ops/sync-manifest.txt';
+
+// skill の正本ディレクトリと、そこから導出する各エージェントのミラー先
+const SKILL_CANON = '.claude/skills/';
+const SKILL_MIRROR_ROOTS = ['.codex', '.openhands', '.gemini', '.agents'];
 
 const [, , aiOpsRoot, targetRoot, consumerSlug] = process.argv;
 if (!aiOpsRoot || !targetRoot || !consumerSlug) {
@@ -55,6 +65,14 @@ const desired = new Map();
 const sharedRoot = path.join(aiOpsRoot, 'shared');
 if (existsSync(sharedRoot)) {
   for (const rel of walk(sharedRoot)) desired.set(rel.split(path.sep).join('/'), path.join(sharedRoot, rel));
+}
+// skill ミラーを正本から導出（shared/ に明示的に置かれた同パスのファイルがあればそちらを優先）
+for (const [rel, src] of [...desired]) {
+  if (!rel.startsWith(SKILL_CANON)) continue;
+  for (const root of SKILL_MIRROR_ROOTS) {
+    const mirror = path.posix.join(root, 'skills', rel.slice(SKILL_CANON.length));
+    if (!desired.has(mirror)) desired.set(mirror, src);
+  }
 }
 const tasksRoot = path.join(aiOpsRoot, 'tasks', consumerSlug);
 if (existsSync(tasksRoot)) {
