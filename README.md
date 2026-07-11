@@ -11,8 +11,10 @@ AIエージェント（Codex / Claude Code / Gemini CLI / OpenHands / GitHub Cop
 
 ## なぜ「同期（コピーを各リポジトリに置く）」なのか
 
-エージェントは1セッション1リポジトリしか見えず、兄弟リポジトリのメモリ（AGENTS.md/CLAUDE.md）は
-自動ロードされない。したがって「全リポジトリの AI に同じ共通ルールを確実に効かせる」唯一堅牢な方法は、
+エージェントは原則1セッション1リポジトリしか見えず、兄弟リポジトリのメモリ（AGENTS.md/CLAUDE.md）は
+自動ロードされない（例外は [`shared/docs/OPS_SYNC_DESIGN.md`](shared/docs/OPS_SYNC_DESIGN.md)
+「前提・限界」のマルチリポジトリセッションの項）。
+したがって「全リポジトリの AI に同じ共通ルールを確実に効かせる」唯一堅牢な方法は、
 **共通ルールを各リポジトリの AGENTS.md に物理的に存在させる**こと。その配布を自動化するのが本リポジトリ。
 
 エージェントごとに入口ファイルが違う（Codex=`AGENTS.md`、Claude Code=`CLAUDE.md`、Gemini CLI=`GEMINI.md`）が、
