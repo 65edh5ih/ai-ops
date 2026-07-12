@@ -86,6 +86,8 @@ URL を推測で組み立てたときはその旨を添える。
 - **push 前に、その PR がマージ済み/クローズ済みでないか必ず確認する**。正本は PR の実マージ状態
   （`merged`/`state`）。`git log origin/main..HEAD` は squash merge を検出できない。
   マージ済み/クローズ済みなら push せず、最新の `main` から新ブランチを切り直す。
+  （`.githooks/pre-push` が「今セッションで再 push」のときこの確認を促すリマインドを出す。仕組み・
+  限界は [`docs/reference/MERGED_BRANCH_GUARD.md`](docs/reference/MERGED_BRANCH_GUARD.md)。）
 - 新ブランチを切る前に必ず `git fetch origin main`（コンフリクト予防）。
 - URL に影響する変更・外向き操作は必ずレビュー/確認を求める。
 
