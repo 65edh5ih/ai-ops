@@ -1,0 +1,61 @@
+#!/bin/sh
+# pre-push hook: マージ済みブランチへの再 push を「思い出させる」非ブロック警告。
+#
+# === なぜ「ブロック」をやめ「警告」にしたか（詳細は docs/reference/MERGED_BRANCH_GUARD.md）===
+# 当初はリモートのブランチ存在を `git ls-remote` で確認し、
+# 「以前 push 済みなのに消えている＝マージ後に自動削除された＝マージ済み」を機械的に弾いていた。
+# だが調査(2026-06-27)で、この作業環境では `ls-remote`/`fetch` の判定が原理的に当てにならないと判明した:
+#
+#   - ハーネスはセッション開始時に、未 push のタスクブランチにも refs/remotes/origin/<br> を seed する
+#     (reflog 理由が空・origin/main を指す)。→「ref があれば push 済み」は誤判定の原因。
+#   - さらに重大: この環境の git ミラーは **今セッションで push したブランチを `ls-remote`/`fetch` で返さない**
+#     (main だけは最新に保たれる)。`git fetch origin <自分が push したブランチ>` すら
+#     "couldn't find remote ref" になる。→ `ls-remote` による存在確認は、今セッション関連ブランチに対して
+#     常に「無い」を返すため、初回 push も正当な追加 push も区別できず誤検知する(=毎セッションの誤ブロック)。
+#
+# shell から GitHub API は叩けない(プロキシが MCP 以外を遮断)ため、フック内で
+# 「その PR がマージ済みか」を確実に知る手段は無い。よって機械的ブロックは諦め、
+# **信頼できる唯一の正本＝ MCP `pull_request_read` の merged 状態をエージェントが push 前に確認する**
+# 運用(AGENTS.md)に一本化した。このフックはその確認を促す非ブロックの注意喚起に降格する(push は止めない)。
+#
+# 警告の発火条件: reflog はエフェメラルなコンテナで「今セッションの履歴」になる。
+# remote-tracking ref の reflog に「update by push」がある = 今セッションで既にこのブランチへ push 済み
+# = これは再 push、という信頼できる信号。再 push は 2026-06-26 のマージ済み事故が起きうる場面なので、
+# そのときだけ「マージ済みでないか MCP で確認したか?」を一度リマインドする。
+#
+# 前提: core.logAllRefUpdates が有効(=reflog 記録, 既定で有効)であること。
+# 黙らせる: 確認済みで注意喚起が不要なら SKIP_MERGED_CHECK=1 git push ...（出力を抑止するだけ。挙動は元々非ブロック）
+
+remote="$1"
+zero=$(git hash-object --stdin </dev/null | tr '0-9a-f' '0')
+
+# このフックは push を中断しない(常に exit 0)。リマインドを出すだけ。
+while read -r local_ref local_sha remote_ref remote_sha
+do
+	# ブランチ削除の push(local_sha が全ゼロ)は対象外
+	[ "$local_sha" = "$zero" ] && continue
+
+	# refs/heads/<name> 以外(タグ等)は対象外
+	case "$remote_ref" in
+		refs/heads/*) branch=${remote_ref#refs/heads/} ;;
+		*) continue ;;
+	esac
+
+	# SKIP_MERGED_CHECK=1 ならリマインドも抑止
+	[ "${SKIP_MERGED_CHECK:-}" = "1" ] && continue
+
+	# 今セッションで既にこのブランチへ push 済みか(= 再 push か)。
+	# remote-tracking ref の有無ではなく reflog の「update by push」で判定する
+	# (seed された ref を push 済みと誤認しないため。理由はファイル冒頭参照)。
+	if git reflog show "refs/remotes/$remote/$branch" 2>/dev/null | grep -q 'update by push'; then
+		echo "" >&2
+		echo "ⓘ pre-push リマインド: '$branch' は今セッションで既に push 済み(=再 push)。" >&2
+		echo "   この PR が既にマージ済みだと、追加 push しても main には反映されず手戻りになる(2026-06-26 の事故)。" >&2
+		echo "   push 前に MCP pull_request_read で merged/state を確認したか今一度確認してください。" >&2
+		echo "   マージ済みなら: main から新ブランチを切り、未マージのコミットだけ別 PR にする。" >&2
+		echo "   (このフックは push を止めません。確認済みならこのまま進めて問題ありません)" >&2
+		echo "" >&2
+	fi
+done
+
+exit 0
