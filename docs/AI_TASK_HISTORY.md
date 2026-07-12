@@ -5,6 +5,20 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
 
 ---
 
+## 2026-07-12 共通ブロックに「doc の置き場と命名」節を追加（規格統一）
+
+- **なぜ**: ドキュメント規格・置き場統一の横断作業（nikki-san / private / ai-ops の3セッション同時）で、
+  「docs/ 直下の小文字名＝ai-ops 配布 doc」という見分け規約が nikki-san のローカル規約
+  （docs/README.md）にしかなく、private では初期からの独自ルール（ローカル doc が小文字名・構成の
+  正本 doc なし）と衝突していた。consumer 側での是正（private のリネーム・docs/README.md 新設、
+  nikki-san の reference/incidents 層の整理）と同時に、規約自体を共通ブロックへ昇格して以後の
+  ドリフトを防ぐ。
+- 内容: ローカル doc は大文字スネーク名／小文字は配布 doc（正確な一覧は sync-manifest）、
+  標準サブディレクトリ（reference / incidents / history-archive）の意味、構成の正本は各リポジトリの
+  `docs/README.md`、サブディレクトリ README に正本を置かない。
+- ai-ops 自身は共通ブロックを AGENTS.md に埋め込んでいない（配布元）ため、この規約の適用先は
+  consumer のみ。ai-ops の docs/ は shared/docs への symlink 構成のままでよい。
+
 ## 2026-07-12 マージ済みブランチ防止ガード（doc＋pre-pushフック）を配布物に昇格
 
 - **なぜ**: doc 導線の横断監査（nikki-san セッション発）で、`MERGED_BRANCH_GUARD.md` が nikki-san と
