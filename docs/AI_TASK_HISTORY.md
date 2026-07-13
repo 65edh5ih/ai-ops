@@ -5,6 +5,39 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
 
 ---
 
+## 2026-07-13 命名ポリシーの例外解消（配布doc 2本を小文字ケバブ化）とルール4種の共通昇格
+
+- **なぜ（改名）**: 前日に共通化した「小文字=配布 doc・大文字=ローカル doc」規約に、配布 doc 側の
+  例外が2つ残っていた（`docs/OPS_SYNC_DESIGN.md`・`docs/reference/MERGED_BRANCH_GUARD.md`）。
+  ユーザーから「ポリシーが無いなら揃えたい。ファイル名はゼロベースで設計し直してよい」と明示指示を
+  受け、例外ゼロの形（配布=小文字ケバブ・docs/ 直下、reference/ はローカル専用）に確定。
+  `shared/docs/ops-sync-design.md`・`shared/docs/merged-branch-guard.md` へ改名（manifest 差分で
+  consumer 側の旧パスは自動削除・新パスが配布される）。ai-ops 内の参照（AGENTS.md・README・
+  symlink・pre-push コメント・workflow コメント）も追随。
+- **なぜ（昇格）**: consumer の AGENTS 固有パートに書かれていたが内容が全リポジトリ共通だったルールを
+  共通ブロックへ移した（nikki-san 発: 1依頼=1PR／マージ確認は無条件・「動作確認した」報告は
+  マージ済みの疑い／リネーム・統合時は元ファイルの機能一覧を先に列挙。両リポジトリ重複:
+  コミットメッセージ言語）。consumer 側の重複記述は各リポジトリの同名ブランチで削除。
+- **Notion 引き継ぎは昇格せず削除**: nikki-san の AGENTS にあった Notion `AI Cross-Repo Task Log` の
+  引き継ぎ節を一度共通ブロックへ昇格したが、**この運用は ai-ops 運用開始で廃止済み**とユーザーから
+  指摘を受け取り消した（配布 doc `cross-repo-tasks.md`「Notion 等の外部ツールへの転記は不要」・
+  `outbox-proposal.md`「Notion 等への別途記録は不要」が現行の正）。nikki-san 側の節は廃止済みの
+  残骸だったので削除のままが正しい。
+
+## 2026-07-12 共通ブロックに「doc の置き場と命名」節を追加（規格統一）
+
+- **なぜ**: ドキュメント規格・置き場統一の横断作業（nikki-san / private / ai-ops の3セッション同時）で、
+  「docs/ 直下の小文字名＝ai-ops 配布 doc」という見分け規約が nikki-san のローカル規約
+  （docs/README.md）にしかなく、private では初期からの独自ルール（ローカル doc が小文字名・構成の
+  正本 doc なし）と衝突していた。consumer 側での是正（private のリネーム・docs/README.md 新設、
+  nikki-san の reference/incidents 層の整理）と同時に、規約自体を共通ブロックへ昇格して以後の
+  ドリフトを防ぐ。
+- 内容: ローカル doc は大文字スネーク名／小文字は配布 doc（正確な一覧は sync-manifest）、
+  標準サブディレクトリ（reference / incidents / history-archive）の意味、構成の正本は各リポジトリの
+  `docs/README.md`、サブディレクトリ README に正本を置かない。
+- ai-ops 自身は共通ブロックを AGENTS.md に埋め込んでいない（配布元）ため、この規約の適用先は
+  consumer のみ。ai-ops の docs/ は shared/docs への symlink 構成のままでよい。
+
 ## 2026-07-12 マージ済みブランチ防止ガード（doc＋pre-pushフック）を配布物に昇格
 
 - **なぜ**: doc 導線の横断監査（nikki-san セッション発）で、`MERGED_BRANCH_GUARD.md` が nikki-san と

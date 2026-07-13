@@ -1,1 +1,0 @@
-../shared/docs/OPS_SYNC_DESIGN.md
