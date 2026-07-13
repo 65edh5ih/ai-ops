@@ -3,7 +3,7 @@
 このリポジトリ **ai-ops** は、全リポジトリ（consumer）共通の **運用ルール**・**共通インフラ（ファイル）**・
 **リポジトリ横断タスク**の**単一の正（source of truth）**。ここで1回直すと CI が各 consumer へ配布する。
 
-**作業前に必ず [`shared/docs/OPS_SYNC_DESIGN.md`](shared/docs/OPS_SYNC_DESIGN.md) を読むこと。** 仕組みの全体像（下り＝配布／上り＝提案、
+**作業前に必ず [`shared/docs/ops-sync-design.md`](shared/docs/ops-sync-design.md) を読むこと。** 仕組みの全体像（下り＝配布／上り＝提案、
 各ファイルの唯一の書き手、削除の伝播、トークン構成）が書いてある。運用手順は [`README.md`](README.md)。
 
 ## このリポジトリで変更するとき
@@ -33,7 +33,7 @@
   `outbox-proposal.md` / `ci-logs.md`。手順系 doc（SOP）は書式規約 `shared/docs/sop-format.md` に従い、
   skill ラッパー `shared/.claude/skills/<name>/SKILL.md` を添える。各エージェント向けのミラー
   （`.codex` / `.openhands` / `.gemini` / `.agents`）は `apply-shared.mjs` が配布時に正本から自動生成する
-  ので**置かない**（→ OPS_SYNC_DESIGN.md「配布物の三層＋タスク」）。
+  ので**置かない**（→ ops-sync-design.md「配布物の三層＋タスク」）。
 - **バイト一致であるべき実ファイル**（composite action・共有スクリプト等）→ `shared/` に consumer のパスをミラーして配置。
 - **特定リポジトリ宛の作業依頼** → `tasks/<owner>/<repo>/`（共通化するものではなく、届けるもの）。
 
@@ -41,11 +41,11 @@
 （`apply-common.mjs`）と配置用（`apply-shared.mjs`、`shared/**`・`tasks/**` の配布と削除の伝播）に分かれる。
 
 > ai-ops 内では `docs/<name>.md` を `../shared/docs/<name>.md` への symlink にしておけば、ai-ops 自身の
-> エージェントも consumer と同じパスで読める（`docs/OPS_SYNC_DESIGN.md` と同じ作法）。
+> エージェントも consumer と同じパスで読める（`docs/ops-sync-design.md` と同じ作法）。
 
 ## 完了手順
 
-- 仕組み（スクリプト・workflow・配布対象）を変えたら、**`shared/docs/OPS_SYNC_DESIGN.md` と `README.md` の該当箇所も更新する**
+- 仕組み（スクリプト・workflow・配布対象）を変えたら、**`shared/docs/ops-sync-design.md` と `README.md` の該当箇所も更新する**
   （設計と実装を乖離させない）。
 - `consumers.txt` を変えたら PAT のアクセス対象も合わせる。
 
@@ -55,7 +55,7 @@ ai-ops での作業の「**なぜ**」（コードに無い制約・判断根拠
 （書き方・アーカイブは全リポジトリ共通規約 [`docs/task-history.md`](docs/task-history.md) に従う）。
 consumer に影響する変更・ai-ops 内部だけの変更の区別なく、ここ1箇所でよい:
 上り提案由来の変更は取り込み PR の本文（`理由:`）にも経緯が残り、consumer 側で将来参照しそうな判断根拠は
-配布 doc（`shared/docs/`）自体に書き込むため（→ OPS_SYNC_DESIGN.md「前提・限界」）。
+配布 doc（`shared/docs/`）自体に書き込むため（→ ops-sync-design.md「前提・限界」）。
 
 > **自動チェック**: `.claude/` の `Stop` フック（`check-history.sh`）が、追跡対象（`AGENTS_COMMON.md`・`shared/`・
 > `tasks/`・`scripts/`・`.github/`・`AGENTS.md`・`.claude/` 等）を変更したセッションで、`docs/AI_TASK_HISTORY.md` に

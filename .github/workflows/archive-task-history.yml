@@ -6,7 +6,7 @@ name: Archive task histories
 # アーカイブ PR を生成する（無ければ何もしない）。
 #
 # アーカイブは決定的なファイル移動なので、エージェントのセッション（完了手順）ではなく
-# ここで一括処理する。consumer 側に workflow・Secret を置かない原則（OPS_SYNC_DESIGN.md）は
+# ここで一括処理する。consumer 側に workflow・Secret を置かない原則（ops-sync-design.md）は
 # 変えない: 実行主体はこの workflow だけで、consumer へは何も配布しない。
 #
 # MERGE_MODE の意味は sync.yml と同じ（アーカイブは機械的移動なので再レビュー不要という設計）。

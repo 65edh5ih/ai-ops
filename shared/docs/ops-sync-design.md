@@ -4,7 +4,7 @@
 ここ ai-ops を単一の正（source of truth）として各 consumer へ自動配布するための仕組み。手動リレー
 （外部ツールへのコピペ等）を不要にし、リポジトリ間のドリフトを構造的に防ぐのが目的。
 
-> **ai-ops 内での正本パス**: `shared/docs/OPS_SYNC_DESIGN.md`（`apply-shared.mjs` により各 consumer へ `docs/OPS_SYNC_DESIGN.md` として配布）。
+> **ai-ops 内での正本パス**: `shared/docs/ops-sync-design.md`（`apply-shared.mjs` により各 consumer へ `docs/ops-sync-design.md` として配布）。
 
 ## 解決したい問題
 

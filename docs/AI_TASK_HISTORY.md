@@ -5,6 +5,21 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
 
 ---
 
+## 2026-07-13 命名ポリシーの例外解消（配布doc 2本を小文字ケバブ化）とルール4種の共通昇格
+
+- **なぜ（改名）**: 前日に共通化した「小文字=配布 doc・大文字=ローカル doc」規約に、配布 doc 側の
+  例外が2つ残っていた（`docs/OPS_SYNC_DESIGN.md`・`docs/reference/MERGED_BRANCH_GUARD.md`）。
+  ユーザーから「ポリシーが無いなら揃えたい。ファイル名はゼロベースで設計し直してよい」と明示指示を
+  受け、例外ゼロの形（配布=小文字ケバブ・docs/ 直下、reference/ はローカル専用）に確定。
+  `shared/docs/ops-sync-design.md`・`shared/docs/merged-branch-guard.md` へ改名（manifest 差分で
+  consumer 側の旧パスは自動削除・新パスが配布される）。ai-ops 内の参照（AGENTS.md・README・
+  symlink・pre-push コメント・workflow コメント）も追随。
+- **なぜ（昇格）**: consumer の AGENTS 固有パートに書かれていたが内容が全リポジトリ共通だったルールを
+  共通ブロックへ移した（nikki-san 発: 1依頼=1PR／マージ確認は無条件・「動作確認した」報告は
+  マージ済みの疑い／リネーム・統合時は元ファイルの機能一覧を先に列挙。両リポジトリ重複:
+  コミットメッセージ言語。nikki-san 固有だったが機構自体がクロスリポジトリ: Notion
+  `AI Cross-Repo Task Log` の引き継ぎ運用）。consumer 側の重複記述は各リポジトリの同名ブランチで削除。
+
 ## 2026-07-12 共通ブロックに「doc の置き場と命名」節を追加（規格統一）
 
 - **なぜ**: ドキュメント規格・置き場統一の横断作業（nikki-san / private / ai-ops の3セッション同時）で、
