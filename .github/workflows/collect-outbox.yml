@@ -19,10 +19,15 @@ name: Collect outbox proposals from consumers
 # 「どの consumer からでもルールの正本に書ける」トークンが増殖していた。ルール訂正に
 # 即時性は不要なので、consumer 側のトークン・workflow を全廃してポーリングに戻した。
 # 急ぐときは workflow_dispatch で手動起動する。
+#
+# 間隔（3時間）の根拠: private リポジトリの Actions は無料枠 2,000分/月（アカウント合算・
+# job ごとに分単位切り上げ）を消費する。この run は実測 20〜30秒＝課金1分/回なので、
+# 3時間おき（8回/日 ≒ 240分/月）は枠の1割強。1時間おき（720分/月）は、投稿ごとの
+# deploy 等が集中する月に合算で枠を超えうるため採らない。
 
 on:
   schedule:
-    - cron: '23 */6 * * *'
+    - cron: '23 */3 * * *'
   workflow_dispatch:
 
 concurrency:
