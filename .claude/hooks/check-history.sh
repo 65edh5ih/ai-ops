@@ -39,13 +39,14 @@ changed=$(
 infra=$(printf '%s\n' "$changed" | grep -E '^(AGENTS_COMMON\.md|AGENTS\.md|README\.md|shared/|tasks/|scripts/|sync-deletions\.txt|consumers\.txt|\.github/|\.claude/)' || true)
 [ -z "$infra" ] && exit 0
 
-# AI_TASK_HISTORY.md を更新済みなら即通す。
-if printf '%s\n' "$changed" | grep -qE '^docs/AI_TASK_HISTORY\.md$'; then
+# 履歴フラグメント（docs/history-inbox/ に新規ファイル）または本体 AI_TASK_HISTORY.md を
+# 触っていれば即通す。エージェントの通常経路は前者（1エントリ＝1ファイル）。
+if printf '%s\n' "$changed" | grep -qE '^docs/(history-inbox/.+\.md|AI_TASK_HISTORY\.md)$'; then
   exit 0
 fi
 
 # それ以外は完了境界で1度だけ block して記録を促す。
 cat <<'JSON'
-{"decision":"block","reason":"作業履歴の記録がまだのようです（完了境界での確認）。今回の変更の「なぜ」（コードに無い制約・判断根拠）を docs/AI_TASK_HISTORY.md の先頭へ追記してください。記録、または『記録不要』の判断がついたら、そのまま完了して構いません（この確認は1回だけです）。"}
+{"decision":"block","reason":"作業履歴の記録がまだのようです（完了境界での確認）。今回の変更の「なぜ」（コードに無い制約・判断根拠）を docs/history-inbox/<YYYY-MM-DD>-<スラッグ>.md に1ファイル新規で置いてください（本体 AI_TASK_HISTORY.md には直接書かない）。記録、または『記録不要』の判断がついたら、そのまま完了して構いません（この確認は1回だけです）。"}
 JSON
 exit 0
