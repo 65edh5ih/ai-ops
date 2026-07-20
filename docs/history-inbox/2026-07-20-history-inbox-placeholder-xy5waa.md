@@ -26,3 +26,9 @@
 apply-shared を temp consumer へ実行 → `docs/history-inbox/README.md` がディレクトリごと配布され
 manifest にも載ることを確認。続けて archive-task-history でフラグメントを統合 → README が残り
 ディレクトリが存続することを確認。
+
+### 補足（PR #52 レビュー対応）
+
+配布対象を足したので、ai-ops 完了手順どおり `shared/docs/ops-sync-design.md` と `README.md` の
+タスク履歴統合フローに、この管理プレースホルダの記述を追加（Codex P2 指摘。将来のエージェントが
+「なぜこの README を配布し続けるか」を見失って関連変更で落とさないため）。

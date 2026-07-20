@@ -147,6 +147,11 @@ consumer: エージェントが .ai-ops/outbox/<時刻>-<説明>.md を main に
 保持量超過分を `docs/history-archive/<YYYY>.md` へ移す（archive）。統合すべきフラグメントか超過エントリが
 あるリポジトリにだけ PR を生成・マージする。
 
+`docs/history-inbox/` は**配布された `README.md` プレースホルダ**（正本 `shared/docs/history-inbox/README.md`・
+apply-shared が全 consumer へ配布）で常に空でない状態に保つ: 全フラグメントを統合するとディレクトリが
+空になり、git は空ディレクトリを追跡しないため、これが無いと fresh checkout で「書き込み先」ディレクトリごと
+消える。バッチはこの `README.md` を取り込み対象から除外する（`docs/task-history.md` にも明記）。
+
 - **エージェントのセッションでやらない**（統合・アーカイブとも）: 移動は完全に決定的で判断要素が無く、
   LLM（特に軽量モデル）にやらせるとトークンを浪費するうえ大きなファイル編集を壊しやすい（実際に力尽きる事例があった）。
 - **consumer 側の push 駆動 workflow にしない**: 即時性は上がるが、「consumer 側に workflow・Secret を
