@@ -52,6 +52,9 @@ if (existsSync(historyPath)) {
 const inboxBlocks = [];
 const consumedFiles = [];
 if (existsSync(inboxDir)) {
+  // README.md は取り込まない: ディレクトリを常に git 追跡状態に保つプレースホルダ
+  // （ai-ops が配布・維持）。これを消すと、全フラグメント統合後に inbox が空になり
+  // fresh checkout で「書き込み先」ディレクトリごと消える。
   const files = readdirSync(inboxDir)
     .filter((f) => f.endsWith('.md') && f.toLowerCase() !== 'readme.md')
     .sort();
