@@ -92,7 +92,8 @@ URL を推測で組み立てたときはその旨を添える。
   `README.md` / `SKILL.md` 等）。
 - オンデマンド層の標準サブディレクトリ: `docs/reference/`（固有リファレンス・設計判断・固有手順。
   **ローカル doc 専用**）、`docs/incidents/`（障害・調査ログ。`<題材>_<YYYY-MM-DD>.md` で凍結し、
-  現在形ルールの対象外）、`docs/history-archive/`（タスク履歴の自動アーカイブ）。
+  現在形ルールの対象外）、`docs/history-inbox/`（未統合のタスク履歴フラグメント・1エントリ1ファイル）・
+  `docs/history-archive/`（タスク履歴の自動アーカイブ）。
 - doc を新規作成・移動するときは、そのリポジトリの `docs/README.md`（構成の正本）を先に読み、
   終わったら同ファイルの構成表も追随させる。サブディレクトリの `README.md` に正本を置かない
   （正本は `docs/` 側、README は薄いポインタにする）。
@@ -100,8 +101,10 @@ URL を推測で組み立てたときはその旨を添える。
 ## タスク履歴（スレッド間の短期記憶）
 
 - 「さっきの◯◯」「昨日のあれ」など**過去スレッドの文脈が前提の依頼**は、まず
-  `docs/AI_TASK_HISTORY.md`（直近2作業日分のエントリ）を読む。より古い経緯は `docs/history-archive/` を grep。
-- 書き方の規約は [`docs/task-history.md`](docs/task-history.md)（追記する直前に読む）。
+  `docs/AI_TASK_HISTORY.md`（統合済み・直近2作業日分）**と `docs/history-inbox/` 内の全ファイル**
+  （まだ統合されていない最新のフラグメント）の**両方**を読む。より古い経緯は `docs/history-archive/` を grep。
+- 履歴は本体ファイルに直接追記せず、**1エントリ＝1ファイル**を `docs/history-inbox/` に新規で置く
+  （並行 PR のコンフリクト回避）。書き方・ファイル名規約は [`docs/task-history.md`](docs/task-history.md)（置く直前に読む）。
 
 ## ブランチ・PR の規律
 
@@ -126,8 +129,8 @@ URL を推測で組み立てたときはその旨を添える。
 
 ## 作業完了時の必須手順（ユーザーへの完了報告より前に・促される前に自分から）
 
-1. `docs/AI_TASK_HISTORY.md` に「**なぜ**」を1エントリ追記する（規約:
-   [`docs/task-history.md`](docs/task-history.md)。アーカイブは ai-ops の自動バッチが行うので手を出さない）。
+1. `docs/history-inbox/<YYYY-MM-DD>-<スラッグ>.md` に「**なぜ**」のエントリを**1ファイル**新規で置く（規約:
+   [`docs/task-history.md`](docs/task-history.md)。本体への統合・アーカイブは ai-ops の自動バッチが行うので手を出さない）。
 2. 作業中に実証で誤り・不足と分かったドキュメントをその場で正す（配布 doc なら outbox 提案で。
    黙って回避策で済ませない）。
 

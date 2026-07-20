@@ -1,19 +1,22 @@
 name: Archive task histories
 
-# 各リポジトリの docs/AI_TASK_HISTORY.md の保持量超過分（直近2作業日分を超えた古い日付の
-# エントリ。規約: shared/docs/task-history.md）を docs/history-archive/<YYYY>.md へ移す
-# 集中バッチ。ai-ops 自身と全 consumer を1日1回巡回し、超過があるリポジトリにだけ
-# アーカイブ PR を生成する（無ければ何もしない）。
+# 各リポジトリのタスク履歴の保守バッチ（consolidate + archive。規約: shared/docs/task-history.md）。
+#   1. docs/history-inbox/ の未統合フラグメント（エージェントが 1エントリ1ファイルで置いたもの）を
+#      docs/AI_TASK_HISTORY.md へ取り込み、取り込んだフラグメントを削除する（consolidate）。
+#   2. 取り込み後、保持量（直近2作業日分）を超えた古い日付のエントリを
+#      docs/history-archive/<YYYY>.md へ移す（archive）。
+# ai-ops 自身と全 consumer を1日1回巡回し、統合すべきフラグメントか超過エントリがあるリポジトリにだけ
+# PR を生成する（無ければ何もしない）。
 #
-# アーカイブは決定的なファイル移動なので、エージェントのセッション（完了手順）ではなく
+# consolidate/archive はどちらも決定的なファイル移動なので、エージェントのセッション（完了手順）ではなく
 # ここで一括処理する。consumer 側に workflow・Secret を置かない原則（ops-sync-design.md）は
 # 変えない: 実行主体はこの workflow だけで、consumer へは何も配布しない。
 #
-# MERGE_MODE の意味は sync.yml と同じ（アーカイブは機械的移動なので再レビュー不要という設計）。
+# MERGE_MODE の意味は sync.yml と同じ（機械的移動なので再レビュー不要という設計）。
 
 on:
   schedule:
-    - cron: '17 20 * * *' # 1日1回（JST 早朝）。超過は翌朝までに掃除されれば足りる
+    - cron: '17 20 * * *' # 1日1回（JST 早朝）。統合前も history-inbox を読めば最新は拾えるので日次で足りる
   workflow_dispatch:
 
 env:
@@ -60,7 +63,7 @@ jobs:
           - Started: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
           EOF
 
-      - name: Move overflow entries to archive
+      - name: Consolidate inbox and archive overflow
         run: node scripts/archive-task-history.mjs target 2>&1 | tee /tmp/ci-logs/archive.log
 
       - name: Create or update archive PR
@@ -72,11 +75,14 @@ jobs:
           base: main
           branch: ai-ops/archive-task-history
           delete-branch: true
-          commit-message: 'chore: archive old task history entries'
-          title: 'chore: タスク履歴の古いエントリをアーカイブ'
+          commit-message: 'chore: consolidate task history fragments and archive overflow'
+          title: 'chore: タスク履歴フラグメントの統合と古いエントリのアーカイブ'
           body: |
-            `docs/AI_TASK_HISTORY.md` の保持量（直近2作業日分。規約: `docs/task-history.md`）を
-            超えた古い日付のエントリを `docs/history-archive/` へ移します（本文はそのまま・移動のみ）。
+            タスク履歴の保守（規約: `docs/task-history.md`。本文はそのまま・移動のみ）:
+
+            - `docs/history-inbox/` の未統合フラグメントを `docs/AI_TASK_HISTORY.md` へ取り込み、
+              取り込んだフラグメントを削除します。
+            - 取り込み後、保持量（直近2作業日分）を超えた古い日付のエントリを `docs/history-archive/` へ移します。
 
             この PR は ai-ops の archive-task-history workflow（1日1回の集中バッチ）が自動生成しました。
 

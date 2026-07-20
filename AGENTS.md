@@ -51,13 +51,14 @@
 
 ## 履歴ファイル
 
-ai-ops での作業の「**なぜ**」（コードに無い制約・判断根拠）は **`docs/AI_TASK_HISTORY.md`** に追記する
-（書き方・アーカイブは全リポジトリ共通規約 [`docs/task-history.md`](docs/task-history.md) に従う）。
+ai-ops での作業の「**なぜ**」（コードに無い制約・判断根拠）は **`docs/history-inbox/<YYYY-MM-DD>-<スラッグ>.md`**
+に**1エントリ＝1ファイル**で置く（本体 `docs/AI_TASK_HISTORY.md` への統合は自動バッチが行う。書き方・
+ファイル名規約・統合/アーカイブは全リポジトリ共通規約 [`docs/task-history.md`](docs/task-history.md) に従う）。
 consumer に影響する変更・ai-ops 内部だけの変更の区別なく、ここ1箇所でよい:
 上り提案由来の変更は取り込み PR の本文（`理由:`）にも経緯が残り、consumer 側で将来参照しそうな判断根拠は
 配布 doc（`shared/docs/`）自体に書き込むため（→ ops-sync-design.md「前提・限界」）。
 
 > **自動チェック**: `.claude/` の `Stop` フック（`check-history.sh`）が、追跡対象（`AGENTS_COMMON.md`・`shared/`・
-> `tasks/`・`scripts/`・`.github/`・`AGENTS.md`・`.claude/` 等）を変更したセッションで、`docs/AI_TASK_HISTORY.md` に
-> 触れず完了しようとすると**完了境界で1度 block して記録を促す**（`stop_hook_active` で1回だけ block）。
-> ai-ops 固有設定で、consumer へは配布されない。
+> `tasks/`・`scripts/`・`.github/`・`AGENTS.md`・`.claude/` 等）を変更したセッションで、履歴（`docs/history-inbox/`
+> のフラグメント、または本体 `docs/AI_TASK_HISTORY.md`）に触れず完了しようとすると**完了境界で1度 block して
+> 記録を促す**（`stop_hook_active` で1回だけ block）。ai-ops 固有設定で、consumer へは配布されない。
