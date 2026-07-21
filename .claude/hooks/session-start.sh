@@ -1,0 +1,1 @@
+../../shared/.claude/hooks/session-start.sh

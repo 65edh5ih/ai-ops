@@ -40,7 +40,7 @@ Antigravity は `AGENTS.md` をネイティブに読む（かつ `GEMINI.md` 入
 | `consumers.txt` | 配布先リポジトリ（`owner/repo` を1行ずつ） |
 | `scripts/apply-common.mjs` | （下り）consumer の AGENTS.md のマーカー区間へ反映（無ければ追記） |
 | `scripts/apply-entrypoints.mjs` | （下り）consumer に `CLAUDE.md` / `GEMINI.md` → `AGENTS.md` の入口 symlink を配線 |
-| `scripts/apply-shared.mjs` | （下り）`shared/**`・`tasks/**` の配置と、manifest 差分による削除の伝播、skill ミラーの自動生成 |
+| `scripts/apply-shared.mjs` | （下り）`shared/**`・`tasks/**` の配置（正本の実行ビットを保持）と、manifest 差分による削除の伝播、skill ミラーの自動生成 |
 | `.github/workflows/sync.yml` | （下り）変更時＋cron（1日1回の再適用＝手編集ドリフトの自己修復）で各 consumer へ同期PRを自動生成（MERGE_MODE で自動マージ可） |
 | `scripts/collect-outbox.mjs` | （上り）consumer の `.ai-ops/outbox/*.md` 提案を種別に応じて反映（1 consumer 分をまとめて処理・不正な提案は `rejected/` へ差し戻し） |
 | `.github/workflows/collect-outbox.yml` | （上り）cron（約6時間ごと）＋手動で提案を拾い、取り込みPR＋掃除PRを生成。あわせてトゥームストーン掃除 |
