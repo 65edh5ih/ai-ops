@@ -17,7 +17,7 @@
 //
 // 中身が同じファイルは書かない（PR を無駄に作らないため）。
 // 使い方: node apply-shared.mjs <ai-ops root> <consumer checkout root> <owner/repo>
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, rmSync, statSync, chmodSync } from 'node:fs';
 import path from 'node:path';
 
 const MANIFEST = '.ai-ops/sync-manifest.txt';
@@ -91,11 +91,14 @@ for (const [rel, src] of desired) {
   }
   const dst = path.join(targetRoot, rel);
   const buf = readFileSync(src);
+  const mode = statSync(src).mode & 0o777; // 実行ビット等を正本から保持（配布 hook/スクリプトが実行可能であるように）
   let cur = null;
-  try { cur = readFileSync(dst); } catch {}
-  if (cur && cur.equals(buf)) continue;
+  let curMode = null;
+  try { cur = readFileSync(dst); curMode = statSync(dst).mode & 0o777; } catch {}
+  if (cur && cur.equals(buf) && curMode === mode) continue;
   mkdirSync(path.dirname(dst), { recursive: true });
   writeFileSync(dst, buf);
+  chmodSync(dst, mode);
   console.log(`updated ${rel}`);
   changed++;
 }
