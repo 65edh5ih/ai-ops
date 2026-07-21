@@ -105,7 +105,10 @@ const moved = dated.filter((b) => !keep.has(b.date));
 // 連結時の境界だけ空行1つに正規化する（エントリ本文には触れない）。
 const join = (parts) => parts.map((p) => p.replace(/\s+$/, '')).join('\n\n') + '\n';
 
-// --- 4. 超過分を年ごとにアーカイブの先頭（preamble の直後・既存エントリの前）へ差し込む ---
+// --- 4. 超過分を年ごとにアーカイブへ差し込む（moved と既存エントリを日付降順にマージ） ---
+// 単純に先頭 prepend にすると、既にアーカイブ済みのエントリより古い日付のエントリを後から
+// 流したとき（例: バックデートしたフラグメント）に、古いエントリが新しいエントリの上に来て
+// 年内の「新しいものが上」が崩れる。moved と既存 tail をブロック単位で結合し直して再ソートする。
 const byYear = new Map();
 for (const b of moved) {
   const year = b.date.slice(0, 4);
@@ -117,16 +120,20 @@ for (const [year, entries] of byYear) {
   let head = `# 作業履歴アーカイブ ${year}\n\n` +
     '`docs/AI_TASK_HISTORY.md` から移されたエントリ（新しいエントリが上）。' +
     '規約: [`../task-history.md`](../task-history.md)。\n\n---\n';
-  let tail = '';
+  let existingBlocks = [];
   if (existsSync(archivePath)) {
-    const cur = readFileSync(archivePath, 'utf8');
-    const first = cur.match(headingRe);
-    const cut = first ? cur.indexOf(first[0]) : cur.length;
-    head = cur.slice(0, cut);
-    tail = cur.slice(cut);
+    const { preamble: archPreamble, blocks: archBlocks } = splitBlocks(readFileSync(archivePath, 'utf8'));
+    if (archPreamble.trim()) head = archPreamble;
+    existingBlocks = archBlocks;
   }
+  // moved（今回分・新しい順）を先に置いてから安定ソートするので、同一日付では今回分が既存より上に来る
+  // （本体統合が inbox を main より前に置くのと同じ扱い）。日付無しブロックは順序対象外として先頭に残す。
+  const merged = [...entries, ...existingBlocks];
+  const mergedUndated = merged.filter((b) => !b.date);
+  const mergedDated = merged.filter((b) => b.date);
+  mergedDated.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)); // 新しい順（安定ソート）
   mkdirSync(path.dirname(archivePath), { recursive: true });
-  writeFileSync(archivePath, join([head, ...entries.map((e) => e.text), tail].filter((s) => s.trim())));
+  writeFileSync(archivePath, join([head, ...mergedUndated.map((b) => b.text), ...mergedDated.map((b) => b.text)].filter((s) => s.trim())));
   console.log(`archived ${entries.length} entr(ies) -> ${path.relative(repoRoot, archivePath)}`);
 }
 
