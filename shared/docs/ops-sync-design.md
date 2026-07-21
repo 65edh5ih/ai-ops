@@ -63,8 +63,10 @@
    配布する（例: `shared/.claude/hooks/session-start.sh`）。ただし hook を**起動する**登録
    （consumer の `.claude/settings.json` の `SessionStart` 等）は repo ローカルで**配布対象外**——
    すでにその登録がある consumer は配布された実体をそのまま拾う（新規に効かせたい repo では登録を1回足す）。
-   `session-start.sh` は githooks 有効化＋（`docs/AI_CONTEXT.md` があれば全文）＋**タスク履歴の見出し(TOC)**を
-   注入する。履歴は本文でなく見出しだけ載せ、本文はエージェントがオンデマンドで読む（→ `docs/task-history.md`）。
+   `session-start.sh` は githooks 有効化＋（`docs/AI_CONTEXT.md` があれば全文注入）。AI_CONTEXT は「真の必読」
+   ＝実質どのタスクでも要るのでフックで確実に載せる（この repo に無ければ skip＝現状 nikki-san のみ発火）。
+   **タスク履歴は注入しない**: 毎回は要らず（過去参照タスクのときだけ要る）、どこに何があるかは常時ロードの
+   AGENTS.md「タスク履歴（短期記憶）」にあるので on-demand で読む（→ `docs/task-history.md`）。
 4. **リポジトリ横断タスク** — 正本 `tasks/<owner>/<repo>/*.md`。**その consumer だけ**の
    `.ai-ops/tasks/` へ配置。運用は `docs/cross-repo-tasks.md`。
 
