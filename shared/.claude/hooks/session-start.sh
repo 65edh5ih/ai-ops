@@ -74,4 +74,6 @@ output=$(
   history_toc
 )
 
-echo "$output" | jq -Rs '{"message": .}'
+# SessionStart フックは hookSpecificOutput.additionalContext でコンテキストを注入する
+# （トップレベル message は認識されない。docs: code.claude.com/docs/en/hooks#sessionstart）。
+echo "$output" | jq -Rs '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: .}}'
