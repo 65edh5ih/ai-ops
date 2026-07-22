@@ -1,6 +1,7 @@
 // consumer の AGENTS.md への「別名入口」を symlink で用意する（下り・配線）。
 //   CLAUDE.md -> AGENTS.md   （Claude Code は CLAUDE.md を読む）
 //   GEMINI.md -> AGENTS.md   （Gemini CLI に既定の GEMINI.md 探索で AGENTS.md を読ませる）
+//   QWEN.md   -> AGENTS.md   （Qwen Code に既定の QWEN.md 探索で AGENTS.md を読ませる）
 //
 // これらは AGENTS.md（consumer ごとに内容が異なる／`shared/` の外）を指すため、
 // shared/ 経由では配れない（apply-shared は symlink を実体化＝凍結してしまう）。
@@ -20,7 +21,7 @@ if (!targetRoot) {
 }
 
 const TARGET = 'AGENTS.md';
-const ALIASES = ['CLAUDE.md', 'GEMINI.md'];
+const ALIASES = ['CLAUDE.md', 'GEMINI.md', 'QWEN.md'];
 
 // AGENTS.md が無ければ壊れリンクになるだけなので何もしない
 // （apply-common が先に AGENTS.md を用意している前提。未配線 consumer への保険）。
