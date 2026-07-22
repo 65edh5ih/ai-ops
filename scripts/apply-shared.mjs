@@ -23,9 +23,10 @@ import path from 'node:path';
 const MANIFEST = '.ai-ops/sync-manifest.txt';
 
 // skill の正本ディレクトリと、そこから導出する各エージェントのミラー先
-// （.agents=Antigravity / .qwen=Qwen Code〔.qwen/skills/ を description マッチで自動発火〕）
+// （.agents=Antigravity / .qwen=Qwen Code / .cline=Cline。いずれも <root>/skills/<name>/SKILL.md を
+//  description マッチで自動発火する。Cline は常時ルールを .clinerules/ で受けつつ SOP は .cline/skills/ で拾う）
 const SKILL_CANON = '.claude/skills/';
-const SKILL_MIRROR_ROOTS = ['.codex', '.openhands', '.gemini', '.agents', '.qwen'];
+const SKILL_MIRROR_ROOTS = ['.codex', '.openhands', '.gemini', '.agents', '.qwen', '.cline'];
 
 const [, , aiOpsRoot, targetRoot, consumerSlug] = process.argv;
 if (!aiOpsRoot || !targetRoot || !consumerSlug) {

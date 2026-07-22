@@ -20,12 +20,16 @@
   `shared/` に置いて誘導する（入口が consumer 非依存の実ファイル＝`apply-shared` の通常配布で届き、symlink 配線は
   不要）。ポインタ本体は書かず AGENTS.md → `docs/` 参照で手順書層をカバー（skill 自動発火機構が無いため）。
   - Cursor: `.cursor/rules/ai-ops.mdc`（frontmatter `alwaysApply: true`）
-  - Cline: `.clinerules/ai-ops.md`（`.clinerules/` ディレクトリ配下の Markdown を常時ロード）
+  - Cline: `.clinerules/ai-ops.md`（`.clinerules/` ディレクトリ配下の Markdown を常時ロード）。加えて Cline は
+    v3.48〜 skill（`.cline/skills/<name>/SKILL.md`）を description マッチで自動発火するため（Codex レビュー指摘
+    ＋公式 skill doc で確認・PR #57）、`SKILL_MIRROR_ROOTS` にも `.cline` を追加。常時ルールは `.clinerules/`
+    ポインタ、SOP は `.cline/skills/` ミラーの二本立て（Gemini/Qwen と同じ構成）。Cursor/Windsurf は SKILL.md
+    標準を未採用のためポインタのみ。
   - Windsurf: `.windsurf/rules/ai-ops.md`（frontmatter `trigger: always_on`・1行目から frontmatter）
 
 ### 実装
 
-- `scripts/apply-shared.mjs`: `SKILL_MIRROR_ROOTS` に `.qwen` を追加（Qwen の skill ミラー）。
+- `scripts/apply-shared.mjs`: `SKILL_MIRROR_ROOTS` に `.qwen`（Qwen）・`.cline`（Cline）を追加。
 - `scripts/apply-entrypoints.mjs`: Qwen は native-AGENTS 扱いのため `ALIASES` は変更なし（QWEN.md symlink は
   張らない）。コメントにその理由（二重ロード回避）を明記。
 - 新規固定内容ポインタ: `shared/.cursor/rules/ai-ops.mdc`・`shared/.clinerules/ai-ops.md`・

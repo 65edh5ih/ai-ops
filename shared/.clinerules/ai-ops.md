@@ -11,5 +11,5 @@
 該当する状況になったら対応する `docs/<name>.md` を読んでから作業する。
 
 > このファイルはポインタのみ。ルール本体を書き足さないこと（`AGENTS.md` と二重管理になる）。
-> Cline には skill の自動発火機構が無いため、上記のとおり `AGENTS.md` → `docs/` の参照で手順書層を
-> カバーする（OpenHands V0 と同じ扱い）。
+> 特定タスクの共通 SOP は `.cline/skills/<name>/SKILL.md`（description マッチで自動発火）でも拾えるが、
+> 常時ルール層はこのポインタ経由で `AGENTS.md` を読むのが正。手順書の本体は常に `docs/<name>.md` 側にある。
