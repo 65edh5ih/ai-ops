@@ -18,17 +18,17 @@ Continue / Cursor / Cline / Windsurf / Antigravity）向けの
 したがって「全リポジトリの AI に同じ共通ルールを確実に効かせる」唯一堅牢な方法は、
 **共通ルールを各リポジトリの AGENTS.md に物理的に存在させる**こと。その配布を自動化するのが本リポジトリ。
 
-エージェントごとに入口ファイルが違う（Codex=`AGENTS.md`、Claude Code=`CLAUDE.md`、Gemini CLI=`GEMINI.md`、
-Qwen Code=`QWEN.md`）が、`CLAUDE.md` / `GEMINI.md` / `QWEN.md` を `AGENTS.md` への symlink にすれば
-**全エージェントが同じ AGENTS.md を読む**。この入口 symlink は sync が各 consumer に自動配線する
-（`scripts/apply-entrypoints.mjs`）ので、正本はプレーンな `AGENTS.md` 一本でよい（plugin / hook に依存しない
-＝エージェント非依存）。OpenHands V0 だけは AGENTS.md を既定で読まないため、
-`shared/.openhands/microagents/repo.md`（AGENTS.md へのポインタ）で誘導する。GitHub Copilot
+エージェントごとに入口ファイルが違う（Codex=`AGENTS.md`、Claude Code=`CLAUDE.md`、Gemini CLI=`GEMINI.md`）が、
+`CLAUDE.md` / `GEMINI.md` を `AGENTS.md` への symlink にすれば**全エージェントが同じ AGENTS.md を読む**。この
+入口 symlink は sync が各 consumer に自動配線する（`scripts/apply-entrypoints.mjs`）ので、正本はプレーンな
+`AGENTS.md` 一本でよい（plugin / hook に依存しない＝エージェント非依存）。OpenHands V0 だけは AGENTS.md を
+既定で読まないため、`shared/.openhands/microagents/repo.md`（AGENTS.md へのポインタ）で誘導する。GitHub Copilot
 （`.github/copilot-instructions.md`）・Continue（`.continue/rules/ai-ops.md`）・Cursor（`.cursor/rules/ai-ops.mdc`）・
 Cline（`.clinerules/ai-ops.md`）・Windsurf（`.windsurf/rules/ai-ops.md`）も同様に、`shared/` 配布の固定内容
 ポインタから AGENTS.md へ誘導する（入口が実ファイルなので symlink 配線は不要）。Codex / Kimi Code CLI /
-Antigravity は `AGENTS.md` をネイティブに読む（Antigravity・Qwen Code は `GEMINI.md` / `QWEN.md` 入口 symlink も
-拾う）ため、**追加配線なしで対応済み**（詳細は `shared/docs/ops-sync-design.md`「前提・限界」のエージェント別入口一覧）。
+Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は既定の `QWEN.md` に加え AGENTS.md も読むため
+入口 symlink を張ると二重ロードになる＝張らない。ただし `.qwen/skills/` の skill ミラーは配る）ため、
+**追加配線なしで対応済み**（詳細は `shared/docs/ops-sync-design.md`「前提・限界」のエージェント別入口一覧）。
 
 ## 構成
 
