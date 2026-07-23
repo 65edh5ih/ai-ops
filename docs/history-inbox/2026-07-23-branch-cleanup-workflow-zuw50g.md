@@ -11,7 +11,10 @@ private の Cloudflare Workers Builds 接続で Production branch 一覧に main
 - **workflow ファイルの配布には token 権限の壁**: sync は `OPS_SYNC_TOKEN`（PAT）で consumer に push するが、
   GitHub は `.github/workflows/` 配下を `workflow` 権限の無い PAT で push させない。従来の shared 配布物は
   composite action（`.github/actions/`）止まりで workflow ファイルは初。**OPS_SYNC_TOKEN に Workflows 書き込み
-  権限の付与が必要**（無いと sync PR の push が consumer で失敗する）。ユーザーに要通知。
+  権限の付与が必要**（無いと sync PR の push が consumer で失敗する）。Codex P1 の指摘どおり README・
+  ops-sync-design.md（Secret 表＋設計注記）・sync.yml コメントの token 権限記載を Workflows:RW 込みに更新。
+  設計 doc は元々この権限を「blast radius を広げる」と避ける論調だったが、ユーザー判断（A: shared 配布維持）で
+  付与する方針とし、対象は token が既に Contents:RW を持つ同じ repo 群に限られる点を注記に明記した。
 - ai-ops は sync の consumer ではない（consumers.txt = nikki-san, private のみ）ため、shared の正本に加えて
   ai-ops 自身の `.github/workflows/` にも**バイト一致コピー**を置く（両方を同時に直す）。
 - 安全設計: 手動のみ（workflow_dispatch）・**既定 dry-run**・既定ブランチ/keep 一覧/オープン PR head を常に

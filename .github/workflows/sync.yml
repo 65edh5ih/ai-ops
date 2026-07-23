@@ -8,7 +8,9 @@ name: Sync common rules to consumers
 # 「次に ai-ops を変更するまで」ドリフトが残り続ける（エージェントが古い/改変された
 # ルールを読んで従ってしまう）。適用スクリプトは冪等で、差分が無ければ PR は立たない。
 # 既定の GITHUB_TOKEN は他リポジトリに書けないため、複数リポジトリ権限の PAT を
-# Secret OPS_SYNC_TOKEN（Contents: RW / Pull requests: RW）で渡すこと。
+# Secret OPS_SYNC_TOKEN（Contents: RW / Pull requests: RW / Workflows: RW）で渡すこと。
+# Workflows: RW は shared/.github/workflows/（例 branch-cleanup.yml）を consumer へ配布するために必須
+# （GitHub は .github/workflows/ 配下を Workflows 権限の無い PAT で push させない）。
 #
 # MERGE_MODE — 同期PRの扱い（内容は ai-ops の main マージ時点でレビュー済みなので、
 # consumer 側での再レビューは原則不要という設計）:
