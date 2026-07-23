@@ -1,7 +1,7 @@
 ## 2026-07-23 CI ログ「失敗時のみフル収集」を正本 ci-logs.md に昇格（今後の実装へ引き継ぎ）
 
 - **なぜ**: nikki-san #627 が `collect-deploy-run-logs.yml`（`workflow_run` のフル生ログ collector）を
-  `conclusion == 'failure' || 'timed_out'` でゲートし「失敗時のみ回収」に変えたが、この設計原則は
+  `conclusion == 'failure' || conclusion == 'timed_out'` でゲートし「失敗時のみ回収」に変えたが、この設計原則は
   nikki-san のリポジトリ固有 doc（`docs/ci/CI_LOGS.md` 他）にしか残っておらず、**配布正本
   `shared/docs/ci-logs.md` は未更新**だった。そのため「今後の実装／他 consumer の新規 collector に
   引き継がれるか」を確認したところ引き継がれない状態（正本 step4 は collector に workflow 名を登録する
