@@ -18,6 +18,11 @@ nikki-san#636 / private#401（net-fetch を配布した同期 PR）への Codex 
   **リポジトリ固有**（collector `collect-deploy-run-logs.yml` と設計 doc は nikki-san ローカル・配布対象外）。
   正本では直せないので nikki-san 側のローカル変更で対応する（別 PR）。
 
+- **userinfo 資格情報の漏洩（#70 への再レビュー P1）**: `SAFE_URL` は token パターンとクエリ値しか伏字にせず、
+  `https://user:pass@host/` の `user:pass@` を残していた。userinfo チェックで fetch は reject するが `emit` は
+  `SAFE_URL` を `meta.txt` に書く→集約モードで公開 ci-logs に資格情報が残る。対処: `redact_secrets` に
+  `s|(://)[^/?#@]*@|\1[REDACTED-USERINFO]@|` を追加（パス/クエリ中の `@` は `/?#` 境界で誤爆しない）。
+
 学び: 配布物への指摘は「同一ファイルを持つ全 consumer 分」を1回で正本修正すれば足りるが、consumer ごとに
 Codex が見る文脈（各 repo の AGENTS.md・collector 有無）が違い、**consumer PR にしか出ない指摘**もある
 （今回の注入・PEM・クエリは #68 に出ず #636/#401 で出た）。配布した net-fetch のレビューは consumer 側 PR も

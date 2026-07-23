@@ -54,7 +54,9 @@ redact_secrets() {
   for p in "${SECRET_PATTERNS[@]}"; do
     s="$(printf '%s' "$s" | sed -E "s/$p/[REDACTED-SECRET]/g")"
   done
-  printf '%s' "$s" | sed -E 's/([?&](access_token|api_key|apikey|client_secret|password|token|authorization)=)[^&#]*/\1[REDACTED]/gI'
+  printf '%s' "$s" \
+    | sed -E 's|(://)[^/?#@]*@|\1[REDACTED-USERINFO]@|' \
+    | sed -E 's/([?&](access_token|api_key|apikey|client_secret|password|token|authorization)=)[^&#]*/\1[REDACTED]/gI'
 }
 # ファイルを in-place で伏字にする。PEM 秘密鍵は BEGIN 行だけでなく本文・END まで丸ごと（行単位の
 # sed だと BEGIN 行しか消えず base64 本文が残るため）。そのあと単一行に載る token 類を sed で伏字。
