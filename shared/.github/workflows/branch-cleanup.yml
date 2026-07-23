@@ -1,0 +1,127 @@
+name: Branch cleanup
+
+# エージェント生成の stale ブランチ（claude/*, codex/*, ai-ops/* 等）を手動で一括削除する。
+# GitHub の "Automatically delete head branches" は「マージされた PR の head」しか消さないため、
+# マージせず close した PR・PR の無いブランチ・設定 ON より前からあるブランチは残り続ける。それが
+# 溜まると Cloudflare Workers Builds の接続ダイアログで Production branch 一覧（アルファベット順・
+# 先頭ページのみ）に main が載らなくなる等の実害が出る。
+#
+# 正本は ai-ops の shared/.github/workflows/branch-cleanup.yml。consumer（private / nikki-san）へは
+# ai-ops の sync がそこから配布する。ai-ops 自身は sync の consumer ではないため .github/workflows/
+# にも同一コピーを置く（変更するときは両方を同時に直す）。
+#
+# 手動のみ（workflow_dispatch）。**既定は dry-run（削除せず対象を一覧するだけ）**。実削除は
+# dry_run=false で再実行する。安全策として、既定ブランチ・keep 一覧・オープン PR の head は常に
+# 除外し、prefixes に一致し かつ 最終コミットが age_days より古いブランチだけを対象にする。
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'true=対象を一覧するだけ（削除しない） / false=実際に削除する'
+        type: boolean
+        default: true
+      age_days:
+        description: '最終コミットがこの日数より古いブランチだけを対象にする'
+        type: string
+        default: '7'
+      prefixes:
+        description: '削除対象にするブランチ名プレフィックス（空白区切り）'
+        type: string
+        default: 'claude/ codex/ codex- ai-ops/ import-posts-'
+      keep:
+        description: '常に保護するブランチ名（空白区切り。既定ブランチとオープン PR の head は自動保護）'
+        type: string
+        default: 'main ci-logs hugo-bin deploy-logs'
+
+permissions:
+  contents: write        # ブランチ(ref)の削除に必要
+  pull-requests: read    # オープン PR の head を保護対象に集めるため
+
+concurrency:
+  group: branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Delete stale agent branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          AGE_DAYS: ${{ inputs.age_days }}
+          PREFIXES: ${{ inputs.prefixes }}
+          KEEP: ${{ inputs.keep }}
+        run: |
+          set -euo pipefail
+
+          # 既定ブランチ（API から取得。取れなければ現在の ref）
+          default_branch="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
+          [ -z "$default_branch" ] && default_branch="${GITHUB_REF_NAME}"
+
+          # 全ブランチ ref を取得（committerdate を得るため）
+          git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*'
+
+          # 保護対象: keep 一覧 + 既定ブランチ + オープン PR の head
+          declare -A protect
+          for b in $KEEP $default_branch; do protect["$b"]=1; done
+          while IFS= read -r h; do
+            [ -n "$h" ] && protect["$h"]=1
+          done < <(gh pr list --state open --limit 1000 --json headRefName --jq '.[].headRefName')
+
+          cutoff=$(( $(date -u +%s) - AGE_DAYS * 86400 ))
+
+          candidates=0; deleted=0; skipped=0
+          {
+            echo "## Branch cleanup (dry_run=${DRY_RUN}, age_days=${AGE_DAYS})"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          while read -r ts ref; do
+            b="${ref#origin/}"
+            [ "$b" = "HEAD" ] && continue
+
+            # プレフィックス一致のものだけ対象
+            match=0
+            for p in $PREFIXES; do
+              case "$b" in "$p"*) match=1 ;; esac
+            done
+            [ "$match" = 0 ] && continue
+
+            # 保護（keep / 既定ブランチ / オープン PR head）
+            if [ -n "${protect[$b]:-}" ]; then
+              echo "keep (protected): $b"; skipped=$((skipped+1)); continue
+            fi
+            # 年齢（新しすぎるものは残す）
+            if [ "$ts" -ge "$cutoff" ]; then
+              echo "keep (newer than ${AGE_DAYS}d): $b"; skipped=$((skipped+1)); continue
+            fi
+
+            candidates=$((candidates+1))
+            last="$(date -u -d "@$ts" +%Y-%m-%d)"
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "[dry-run] would delete: $b (last commit $last)"
+              echo "- would delete \`$b\` (last commit $last)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "deleting: $b (last commit $last)"
+              git push origin --delete "$b"
+              echo "- deleted \`$b\` (last commit $last)" >> "$GITHUB_STEP_SUMMARY"
+              deleted=$((deleted+1))
+            fi
+          done < <(git for-each-ref --format='%(committerdate:unix) %(refname:short)' refs/remotes/origin)
+
+          echo "----"
+          echo "candidates=$candidates deleted=$deleted skipped=$skipped dry_run=$DRY_RUN age_days=$AGE_DAYS"
+          {
+            echo ""
+            echo "candidates=**$candidates** deleted=**$deleted** skipped=$skipped"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$DRY_RUN" = "true" ] && [ "$candidates" -gt 0 ]; then
+            echo "::notice::dry-run: $candidates branch(es) would be deleted. Re-run with dry_run=false to delete."
+          fi
