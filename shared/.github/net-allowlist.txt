@@ -17,3 +17,6 @@
 # 例（必要になったら実際のドメインに置き換える。未使用の例は残さない）:
 # raw.githubusercontent.com
 # api.github.com
+
+hysteria.network
+*.hysteria.network
