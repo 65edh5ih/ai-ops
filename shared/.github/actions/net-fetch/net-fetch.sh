@@ -56,6 +56,22 @@ redact_secrets() {
   done
   printf '%s' "$s" | sed -E 's/([?&](access_token|api_key|apikey|client_secret|password|token|authorization)=)[^&#]*/\1[REDACTED]/gI'
 }
+# ファイルを in-place で伏字にする。PEM 秘密鍵は BEGIN 行だけでなく本文・END まで丸ごと（行単位の
+# sed だと BEGIN 行しか消えず base64 本文が残るため）。そのあと単一行に載る token 類を sed で伏字。
+redact_file() {
+  local f="$1" p
+  [ -f "$f" ] || return 0
+  awk '
+    /-----BEGIN[A-Za-z ]*PRIVATE KEY-----/ { print "[REDACTED-PRIVATE-KEY]"; inpem=1; next }
+    inpem && /-----END[A-Za-z ]*PRIVATE KEY-----/ { inpem=0; next }
+    inpem { next }
+    { print }
+  ' "$f" > "$f.__nf" 2>/dev/null && mv "$f.__nf" "$f"
+  for p in "${SECRET_PATTERNS[@]}"; do
+    sed -E -i "s/$p/[REDACTED-SECRET]/g" "$f" 2>/dev/null || true
+  done
+}
+
 SAFE_URL="$(redact_secrets "$URL")"
 
 # request_id は結果スライスのパス素材にもなる（publish の dest = net-fetch/<id>）。.. や / を含むと
@@ -118,8 +134,11 @@ case "$METHOD" in GET|HEAD) : ;; *) reject "method not allowed (GET/HEAD only): 
 # scheme は https のみ
 printf '%s' "$URL" | grep -Eq '^https://' || reject "scheme must be https"
 
-# host を取り出す: scheme を除去 → 最初の / まで → userinfo(@) を除去 → port を除去
+# host を取り出す: scheme を除去 → 最初の / まで → クエリ/フラグメントを除去 → userinfo(@) を除去 → port を除去
+# パスの無い URL（https://example.com?x=1 や https://example.com#frag）でも host に ?/# を残さない。
 hostport="${URL#https://}"; hostport="${hostport%%/*}"
+hostport="${hostport%%\?*}"   # クエリを除去
+hostport="${hostport%%#*}"    # フラグメントを除去
 userinfo_stripped="${hostport##*@}"
 [ "$userinfo_stripped" != "$hostport" ] && reject "userinfo (credentials) in URL is not allowed"
 host="${userinfo_stripped%%:*}"
@@ -190,13 +209,8 @@ head -c "$MAX_BYTES" "$raw_body" > "$OUTPUT_DIR/.body.cut" && mv "$OUTPUT_DIR/.b
 # ── response 側 secret 伏字（万一混ざっても外に残さない）──────
 redacted="$OUTPUT_DIR/response.txt"
 cp "$raw_body" "$redacted"
-for p in "${SECRET_PATTERNS[@]}"; do
-  sed -E -i "s/$p/[REDACTED-SECRET]/g" "$redacted" 2>/dev/null || true
-done
-# headers も同様に伏字（Set-Cookie 等）
-for p in "${SECRET_PATTERNS[@]}"; do
-  [ -f "$headers" ] && { sed -E -i "s/$p/[REDACTED-SECRET]/g" "$headers" 2>/dev/null || true; }
-done
+redact_file "$redacted"      # 本文（PEM ブロック＋token 類）
+redact_file "$headers"       # ヘッダ（Set-Cookie 等）
 rm -f "$raw_body" "$OUTPUT_DIR/.curl.err"
 
 status="ok"; reason=""

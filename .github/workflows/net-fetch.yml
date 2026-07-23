@@ -65,18 +65,24 @@ jobs:
 
       - name: Summarize
         if: always()
+        # 生入力（url/request_id）を run: に ${{ }} で直接埋め込まない。GitHub が bash 実行前に
+        # 展開するため request_id=$(...) 等でスクリプト注入されうる。値はすべて env 経由で渡し、
+        # $VAR として printf する（env の値は再評価されない）。URL は伏字済み meta.txt から拾う。
+        env:
+          REQUEST_ID: ${{ inputs.request_id }}
+          STATUS: ${{ steps.fetch.outputs.status }}
+          HTTP_STATUS: ${{ steps.fetch.outputs.http-status }}
+          DEST: ${{ steps.fetch.outputs.dest }}
         run: |
           set -uo pipefail
-          # URL は生入力ではなく、伏字済みの meta.txt から拾う（要約は public な run ログにも出るため）。
           safe_url="(unavailable)"
           [ -f net-fetch-out/meta.txt ] && safe_url="$(grep -m1 '^url=' net-fetch-out/meta.txt | cut -d= -f2-)"
           {
-            echo "## net-fetch"
-            echo ""
-            echo "- request_id: \`${{ inputs.request_id }}\`"
-            echo "- url: \`$safe_url\`"
-            echo "- status: **${{ steps.fetch.outputs.status }}** (http ${{ steps.fetch.outputs.http-status }})"
-            echo "- result slice: \`${{ steps.fetch.outputs.dest }}/\` on the \`ci-logs\` branch"
+            printf '## net-fetch\n\n'
+            printf -- '- request_id: `%s`\n' "$REQUEST_ID"
+            printf -- '- url: `%s`\n' "$safe_url"
+            printf -- '- status: **%s** (http %s)\n' "$STATUS" "$HTTP_STATUS"
+            printf -- '- result slice: `%s/` on the `ci-logs` branch\n' "$DEST"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # 結果（status/meta/response）を ci-logs ブランチの per-request スライスへ publish する。
