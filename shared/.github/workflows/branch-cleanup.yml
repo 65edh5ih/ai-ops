@@ -61,6 +61,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          # ログを ci-logs 用にも残す（stdout/stderr を tee。$GITHUB_STEP_SUMMARY への出力は別 fd で不変）
+          mkdir -p logs/ci/scripts
+          exec > >(tee logs/ci/scripts/branch-cleanup.log) 2>&1
+
           # 既定ブランチ（API から取得。取れなければ現在の ref）
           default_branch="$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)"
           [ -z "$default_branch" ] && default_branch="${GITHUB_REF_NAME}"
@@ -125,3 +129,39 @@ jobs:
           if [ "$DRY_RUN" = "true" ] && [ "$candidates" -gt 0 ]; then
             echo "::notice::dry-run: $candidates branch(es) would be deleted. Re-run with dry_run=false to delete."
           fi
+
+      # CI ログ運用（docs/ci-logs.md）: 新規ワークフローは削除結果・失敗を ci-logs ブランチへ残す。
+      # 手動 workflow なので inline publish（常時）のみ。フル生ログ collector への登録はリポジトリ固有
+      # （collector がある repo だけ、その workflows 一覧に "Branch cleanup" を失敗時ゲートで足す）。
+      - name: Stage CI log snapshot
+        if: always()
+        run: |
+          set -euo pipefail
+          snap="logs/ci/_snapshot"
+          rm -rf "$snap"; mkdir -p "$snap"
+          if ls logs/ci/scripts/*.log >/dev/null 2>&1; then
+            cp -f logs/ci/scripts/*.log "$snap/"
+          fi
+          {
+            echo "# branch-cleanup run metadata"
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "run_attempt=${GITHUB_RUN_ATTEMPT}"
+            echo "commit_sha=${GITHUB_SHA}"
+            echo "trigger_event=${GITHUB_EVENT_NAME}"
+            echo "actor=${GITHUB_ACTOR}"
+            echo "ref=${GITHUB_REF_NAME}"
+            echo "dry_run=${{ inputs.dry_run }}"
+            echo "generated_at_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } > "$snap/metadata.txt"
+
+      - name: Publish logs to ci-logs branch
+        if: always()
+        uses: ./.github/actions/publish-ci-logs
+        with:
+          source-dir: logs/ci/_snapshot
+          dest: branch-cleanup/latest
+          history-dir: branch-cleanup/history
+          retention-days: "30"
+          run-id: ${{ github.run_id }}
+          commit-message: "ci(logs): branch-cleanup run ${{ github.run_id }}"
+          token: ${{ github.token }}
