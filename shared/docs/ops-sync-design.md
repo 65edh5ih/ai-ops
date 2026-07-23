@@ -154,7 +154,8 @@ consumer: エージェントが .ai-ops/outbox/<時刻>-<説明>.md を main に
 `archive-task-history.yml`（cron 1日1回）が ai-ops＋全 consumer を巡回し、`archive-task-history.mjs` が
 (1) `history-inbox/` のフラグメントを本体へ取り込んでフラグメントを削除（consolidate）、(2) 取り込み後の
 保持量超過分を `docs/history-archive/<YYYY>.md` へ移す（archive）。統合すべきフラグメントか超過エントリが
-あるリポジトリにだけ PR を生成・マージする。
+あるリポジトリにだけ PR を生成・マージする。consolidate は本体に既にある同一本文のエントリ（本文全体の
+trim 一致）を取り込まず、そのフラグメントは削除して掃除する（重複記録の防止。見出しだけの一致では消さない）。
 
 `docs/history-inbox/` は**配布された `README.md` プレースホルダ**（正本 `shared/docs/history-inbox/README.md`・
 apply-shared が全 consumer へ配布）で常に空でない状態に保つ: 全フラグメントを統合するとディレクトリが
