@@ -49,6 +49,14 @@ if (existsSync(historyPath)) {
 }
 
 // --- 2. inbox の各フラグメントを取り込む（有効エントリを含むファイルだけ削除対象にする） ---
+// 重複排除: 本体（AI_TASK_HISTORY.md）に既にある同一本文のエントリはフラグメントから取り込まない。
+// エージェントが本体に既にある内容と同じフラグメントを置くと（本体へ直接書いた分と二重／再生成など）、
+// dedup が無いと統合で本体に区別できない同一レコードが2つ並び、履歴検索が曖昧になる（PR #58 Codex P2）。
+// 判定は「エントリ本文全体の一致（trim 比較）」——見出しだけの一致では消さない（同日別タイトルの
+// 正当なエントリを誤って落とさないため）。重複エントリは取り込まないが、フラグメントは消費（削除）して
+// 掃除する（本体に既にあるので情報は失われない）。inbox 内どうしの重複も同じ set で1つに畳む。
+// 対象は本体のみ（アーカイブ済みエントリとの重複は判定しない＝Codex 指摘の本体二重化が対象）。
+const seen = new Set(mainBlocks.filter((b) => b.date).map((b) => b.text.trim()));
 const inboxBlocks = [];
 const consumedFiles = [];
 if (existsSync(inboxDir)) {
@@ -66,8 +74,18 @@ if (existsSync(inboxDir)) {
       console.warn(`skip ${path.join('docs/history-inbox', f)}: 日付付き '## YYYY-MM-DD' エントリが無い（削除しない）`);
       continue;
     }
-    inboxBlocks.push(...entries);
-    consumedFiles.push(fp);
+    const fresh = [];
+    for (const e of entries) {
+      const key = e.text.trim();
+      if (seen.has(key)) {
+        console.warn(`dedup ${path.join('docs/history-inbox', f)}: 本体に同一エントリが既存 → 取り込まずフラグメントのみ削除`);
+        continue;
+      }
+      seen.add(key);
+      fresh.push(e);
+    }
+    inboxBlocks.push(...fresh);
+    consumedFiles.push(fp); // 全エントリが重複でもファイルは消費（掃除）する
   }
 }
 
