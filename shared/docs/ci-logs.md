@@ -13,14 +13,14 @@ slice 単位で publish する。このための composite action `.github/actio
    (`uses: ./.github/actions/publish-ci-logs`) の2ステップを `if: always()` で足す（＝この inline 公開は
    成功・失敗を問わず常時。各 workflow が自前の要約ログを毎回残す層）。
 4. リポジトリにフル生ログ collector（`workflow_run` で完了 run の生ログ全体を集約する別 workflow）が
-   あるなら、その `workflows` リストにワークフロー名を登録する。**collector は失敗時のみ回収する**
-   （ジョブの `if:` を
+   あるなら、その `workflows` リストにワークフロー名を登録する。**collector は失敗時のみ回収する（MUST）**
+   ——ジョブの `if:` を
    `github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out'`
-   でゲートする。比較は**各値ごとに完全形で書く**——`== 'failure' || 'timed_out'` と略すと、GitHub Actions 式では
-   非空文字列 `'timed_out'` が常に真に評価され、成功 run でもゲートを通り抜けて失敗ゲートが無効化される）。緑の run は上の 1〜3 で各 workflow が
+   でゲートする。比較は**各値ごとに完全形で書く（MUST NOT: `== 'failure' || 'timed_out'` と略す）**——GitHub Actions 式では
+   非空文字列 `'timed_out'` が常に真に評価され、成功 run でもゲートを通り抜けて失敗ゲートが無効化されるため。緑の run は上の 1〜3 で各 workflow が
    inline に要約ログを公開済みで、フル生ログの真価は失敗トリアージにある。監視対象が1つ完了するごとに
    最低1分課金されるランナーを成功 run でも起動するのは空費（過去に GitHub Actions 分の逼迫を招いた実例あり）。
-   collector を**新規に作る**場合も同じ失敗ゲートを必ず付ける。
+   collector を**新規に作る**場合も同じ失敗ゲートを付ける（MUST）。
 5. リポジトリにログ設計ドキュメントがあるなら、その slice 一覧テーブルに行を足す（collector 由来の
    スライスは「失敗/タイムアウトした run のみ」と明記する）。
 
