@@ -1,0 +1,63 @@
+name: Net fetch (clean room)
+description: >-
+  Fetch a single allowlisted URL on behalf of an AI agent, in a clean room that
+  is given no secrets. Enforces an allowlist (common + per-repo union), blocks
+  SSRF to internal/metadata hosts, rejects requests that carry secrets, and
+  redacts any secret-looking strings from the response. Rejections do not fail
+  the job (the result is always published so the agent can read it); only
+  infrastructure errors fail. Distributed to all consumers from ai-ops.
+inputs:
+  url:
+    description: URL to fetch (https only).
+    required: true
+  method:
+    description: HTTP method. GET or HEAD only.
+    required: false
+    default: GET
+  request-id:
+    description: "Correlation id, [A-Za-z0-9._-]+ (used for the result slice path)."
+    required: true
+  allowlist-files:
+    description: >-
+      Space-separated allowlist files; missing ones are skipped and the rest are
+      unioned. Default reads the common list plus the optional per-repo local list.
+    required: false
+    default: ".github/net-allowlist.txt .github/net-allowlist.local.txt"
+  output-dir:
+    description: Directory the result files are written to.
+    required: false
+    default: net-fetch-out
+  max-bytes:
+    description: Maximum response body size in bytes.
+    required: false
+    default: "5242880"
+  timeout-seconds:
+    description: Fetch timeout in seconds.
+    required: false
+    default: "30"
+outputs:
+  status:
+    description: ok | rejected | error
+    value: ${{ steps.fetch.outputs.status }}
+  http-status:
+    description: HTTP status code of the fetch (empty on reject/error).
+    value: ${{ steps.fetch.outputs.http_status }}
+  result-dir:
+    description: Directory containing status.txt / meta.txt / response.txt.
+    value: ${{ steps.fetch.outputs.result_dir }}
+runs:
+  using: composite
+  steps:
+    - id: fetch
+      shell: bash
+      # NOTE: no secrets are exposed to this step on purpose. The clean room must
+      # not be able to put a secret into the outbound request.
+      env:
+        NF_URL: ${{ inputs.url }}
+        NF_METHOD: ${{ inputs.method }}
+        NF_REQUEST_ID: ${{ inputs.request-id }}
+        NF_ALLOWLIST_FILES: ${{ inputs.allowlist-files }}
+        NF_OUTPUT_DIR: ${{ inputs.output-dir }}
+        NF_MAX_BYTES: ${{ inputs.max-bytes }}
+        NF_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+      run: bash "${GITHUB_ACTION_PATH}/net-fetch.sh"
