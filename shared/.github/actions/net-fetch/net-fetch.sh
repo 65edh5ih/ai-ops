@@ -47,13 +47,34 @@ SECRET_QUERY_KEYS='(access_token|api_key|apikey|client_secret|password|token|aut
 mkdir -p "$OUTPUT_DIR"
 status="error"; http_status=""; reason=""
 
+# 出力（meta.txt・要約）に載せる URL は secret を伏字にする。secret 混入で拒否したときに、生 URL を
+# meta.txt 経由で公開 ci-logs（集約モード）へ記録してしまうのを防ぐ。
+redact_secrets() {
+  local s="$1" p
+  for p in "${SECRET_PATTERNS[@]}"; do
+    s="$(printf '%s' "$s" | sed -E "s/$p/[REDACTED-SECRET]/g")"
+  done
+  printf '%s' "$s" | sed -E 's/([?&](access_token|api_key|apikey|client_secret|password|token|authorization)=)[^&#]*/\1[REDACTED]/gI'
+}
+SAFE_URL="$(redact_secrets "$URL")"
+
+# request_id は結果スライスのパス素材にもなる（publish の dest = net-fetch/<id>）。.. や / を含むと
+# 意図した net-fetch/<id> スライスの外へ publish される（path traversal）。検証を通らない id は
+# ユーザー制御でない安全な固定先へ退避し、publish はこの DEST を使う（生入力を dest にしない）。
+if printf '%s' "$REQUEST_ID" | grep -Eq '^[A-Za-z0-9._-]+$' && ! printf '%s' "$REQUEST_ID" | grep -q '\.\.'; then
+  id_safe="$REQUEST_ID"
+else
+  id_safe="_invalid-$(date -u +%Y%m%d-%H%M%S)-$$"
+fi
+DEST="net-fetch/$id_safe"
+
 emit() {
   # status.txt と（あれば）GITHUB_OUTPUT に確定結果を書いて終了する
   printf '%s\n' "$status" > "$OUTPUT_DIR/status.txt"
   [ -n "$reason" ] && printf '%s\n' "$reason" >> "$OUTPUT_DIR/status.txt"
   {
     echo "request_id=$REQUEST_ID"
-    echo "url=$URL"
+    echo "url=$SAFE_URL"
     echo "method=$METHOD"
     echo "status=$status"
     echo "http_status=$http_status"
@@ -65,6 +86,7 @@ emit() {
       echo "status=$status"
       echo "http_status=$http_status"
       echo "result_dir=$OUTPUT_DIR"
+      echo "dest=$DEST"
     } >> "$GITHUB_OUTPUT"
   fi
   echo "net-fetch: status=$status http=$http_status reason=${reason:-none} id=$REQUEST_ID"
@@ -89,7 +111,8 @@ matches_secret() {
 
 # ── 入力検証 ───────────────────────────────────────────────
 [ -n "$URL" ] || fail "empty url"
-printf '%s' "$REQUEST_ID" | grep -Eq '^[A-Za-z0-9._-]+$' || fail "invalid request_id (allowed: A-Za-z0-9._-)"
+{ printf '%s' "$REQUEST_ID" | grep -Eq '^[A-Za-z0-9._-]+$' && ! printf '%s' "$REQUEST_ID" | grep -q '\.\.'; } \
+  || fail "invalid request_id (allowed: A-Za-z0-9._- and must not contain '..')"
 case "$METHOD" in GET|HEAD) : ;; *) reject "method not allowed (GET/HEAD only): $METHOD" ;; esac
 
 # scheme は https のみ

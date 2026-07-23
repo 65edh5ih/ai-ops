@@ -67,22 +67,28 @@ jobs:
         if: always()
         run: |
           set -uo pipefail
+          # URL は生入力ではなく、伏字済みの meta.txt から拾う（要約は public な run ログにも出るため）。
+          safe_url="(unavailable)"
+          [ -f net-fetch-out/meta.txt ] && safe_url="$(grep -m1 '^url=' net-fetch-out/meta.txt | cut -d= -f2-)"
           {
             echo "## net-fetch"
             echo ""
             echo "- request_id: \`${{ inputs.request_id }}\`"
-            echo "- url: \`${{ inputs.url }}\`"
+            echo "- url: \`$safe_url\`"
             echo "- status: **${{ steps.fetch.outputs.status }}** (http ${{ steps.fetch.outputs.http-status }})"
-            echo "- result slice: \`net-fetch/${{ inputs.request_id }}/\` on the \`ci-logs\` branch"
+            echo "- result slice: \`${{ steps.fetch.outputs.dest }}/\` on the \`ci-logs\` branch"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # 結果（status/meta/response）を ci-logs ブランチの per-request スライスへ publish する。
       # これがエージェントの読み戻し口であり、同時に CI ログ（docs/ci-logs.md）の inline publish も兼ねる。
       - name: Publish result to ci-logs branch
-        if: always()
+        # dest が空（＝スクリプトが GITHUB_OUTPUT を書く前に異常終了）のときは publish しない。
+        # 空 dest を publish-ci-logs に渡すと clone を丸ごと消しかねないため。
+        if: always() && steps.fetch.outputs.dest != ''
         uses: ./.github/actions/publish-ci-logs
         with:
           source-dir: net-fetch-out
-          dest: net-fetch/${{ inputs.request_id }}
-          commit-message: "ci(net-fetch): ${{ inputs.request_id }} (${{ steps.fetch.outputs.status }})"
+          # 生入力ではなく、スクリプトが検証・サニタイズした dest を使う（path traversal 防止）。
+          dest: ${{ steps.fetch.outputs.dest }}
+          commit-message: "ci(net-fetch): ${{ steps.fetch.outputs.dest }} (${{ steps.fetch.outputs.status }})"
           token: ${{ github.token }}
