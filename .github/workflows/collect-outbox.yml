@@ -21,8 +21,8 @@ name: Collect outbox proposals from consumers
 # 急ぐときは workflow_dispatch で手動起動する。
 
 on:
-  schedule:
-    - cron: '23 */6 * * *'
+  # schedule:
+  #   - cron: '23 */6 * * *'
   workflow_dispatch:
 
 concurrency:
