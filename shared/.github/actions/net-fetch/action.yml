@@ -45,6 +45,12 @@ outputs:
   result-dir:
     description: Directory containing status.txt / meta.txt / response.txt.
     value: ${{ steps.fetch.outputs.result_dir }}
+  dest:
+    description: >-
+      Sanitized ci-logs slice path to publish the result to (net-fetch/<id>).
+      Falls back to net-fetch/_invalid-* when request-id fails validation, so the
+      publish destination is never taken from unsanitized input.
+    value: ${{ steps.fetch.outputs.dest }}
 runs:
   using: composite
   steps:

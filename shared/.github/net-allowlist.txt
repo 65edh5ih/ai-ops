@@ -14,6 +14,8 @@
 #
 # 迷ったら足さない。実際に必要になったドメインだけを、必要な粒度で足す。
 
+v2.hysteria.network
+
 # 例（必要になったら実際のドメインに置き換える。未使用の例は残さない）:
 # raw.githubusercontent.com
 # api.github.com
