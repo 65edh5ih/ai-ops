@@ -1,0 +1,88 @@
+name: Net fetch
+
+# AI エージェントの代理で「許可ドメインだけ」を公開取得するリレー（クリーンルーム実行）。
+# エージェントは egress 制限下でも GitHub には到達できるので、この workflow を workflow_dispatch で
+# 起動し、結果を ci-logs ブランチの net-fetch/<request_id>/ スライスから読み戻す。手順は docs/net-fetch.md。
+#
+# 集約(=public な ai-ops 上で実行し無料枠で回す)と分散(=各 private repo 上で実行し結果を非公開に保つ)の
+# 両モードで同じこの workflow を使う（正本は shared/、ai-ops 自身にも同一コピーを置く。どちらのリポジトリで
+# 起動するかがモードの違い）。将来の枠連動ルーティング（quota-gate）は「どちらで起動するか」を自動で選ぶ層で、
+# この workflow 自体は変更不要。
+#
+# secret は一切このジョブに渡さない（allowlist・SSRF ガード・secret スキャンは net-fetch.sh が enforce）。
+# 唯一使うトークンは結果を ci-logs へ push する publish-ci-logs 用の github.token で、取得ステップの env には
+# 載せない（クリーンルームに認証情報を持ち込ませない）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: '取得先 URL（https のみ）'
+        type: string
+        required: true
+      request_id:
+        description: '相関 ID（[A-Za-z0-9._-]+）。結果は ci-logs の net-fetch/<request_id>/ に出る'
+        type: string
+        required: true
+      method:
+        description: 'GET か HEAD'
+        type: choice
+        options: [GET, HEAD]
+        default: GET
+      max_bytes:
+        description: '応答本文の上限バイト'
+        type: string
+        default: '5242880'
+      timeout_seconds:
+        description: '取得タイムアウト秒'
+        type: string
+        default: '30'
+
+permissions:
+  contents: write        # publish-ci-logs が ci-logs ブランチへ結果を push するのに必要
+
+concurrency:
+  group: net-fetch-${{ github.event.inputs.request_id }}
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Fetch (clean room)
+        id: fetch
+        uses: ./.github/actions/net-fetch
+        with:
+          url: ${{ inputs.url }}
+          method: ${{ inputs.method }}
+          request-id: ${{ inputs.request_id }}
+          output-dir: net-fetch-out
+          max-bytes: ${{ inputs.max_bytes }}
+          timeout-seconds: ${{ inputs.timeout_seconds }}
+
+      - name: Summarize
+        if: always()
+        run: |
+          set -uo pipefail
+          {
+            echo "## net-fetch"
+            echo ""
+            echo "- request_id: \`${{ inputs.request_id }}\`"
+            echo "- url: \`${{ inputs.url }}\`"
+            echo "- status: **${{ steps.fetch.outputs.status }}** (http ${{ steps.fetch.outputs.http-status }})"
+            echo "- result slice: \`net-fetch/${{ inputs.request_id }}/\` on the \`ci-logs\` branch"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 結果（status/meta/response）を ci-logs ブランチの per-request スライスへ publish する。
+      # これがエージェントの読み戻し口であり、同時に CI ログ（docs/ci-logs.md）の inline publish も兼ねる。
+      - name: Publish result to ci-logs branch
+        if: always()
+        uses: ./.github/actions/publish-ci-logs
+        with:
+          source-dir: net-fetch-out
+          dest: net-fetch/${{ inputs.request_id }}
+          commit-message: "ci(net-fetch): ${{ inputs.request_id }} (${{ steps.fetch.outputs.status }})"
+          token: ${{ github.token }}
