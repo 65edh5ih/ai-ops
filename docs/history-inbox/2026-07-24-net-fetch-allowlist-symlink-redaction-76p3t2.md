@@ -16,10 +16,17 @@
   拒否されるが `SAFE_URL` に生値が残り公開 ci-logs に漏れうる。伏字の `[?&]` アンカーを外し、値終端を
   `[^[:space:]&#;]*` にして拒否と同じ広さにした。
 
-判断メモ: log collector（`collect-deploy-run-logs.yml`）は**リポジトリ固有で配布物ではない**。nikki-san にはあるが
-private には無い（private の workflows は branch-cleanup / deploy-workers / net-fetch のみ）。Codex が collector 登録を
-nikki-san#636 でだけ挙げたのは、collector があるのが nikki-san だけだから。net-fetch を collector に登録しない判断
-（毎 fetch 失敗で collector を起こすのはノイズ・課金）はリポジトリ非依存なので、private 等に collector があっても同じ。
+collector 例外の明文化（ルール整合）: 「新規ワークフローは collector に登録する」は codified rule（`ci-logs.md` 手順4・
+nikki-san の DEPLOY_LOGGING_DESIGN.md チェックリスト）。net-fetch を登録しない判断を**ルール未修正のまま放置していた
+＝サイレント違反**だったので、`shared/docs/ci-logs.md` に「リクエスト単位で毎 run inline publish するワークフロー
+（net-fetch）は collector 登録の対象外」を根拠付きで明記した（黙って回避せず、逸脱はルール側に書く）。
+
+なぜ private に collector が無いか: collector は**リポジトリ固有で配布物ではない**うえ、private は nikki-san とは
+**別のログ設計**を採る。private の `deploy-workers.yml` は各 deploy ログを `deploy-logs/<worker>.log` に書いて
+artifact 化し、`commit-logs` ジョブが `cloudflare_workers/deploy-logs/` に**コミットして**残す方式で、nikki-san の
+`ci-logs` ブランチ＋`publish-ci-logs`＋`collect-deploy-run-logs.yml` の2層モデルを使っていない。よって private に
+collector が無いのは抜けではなく設計差（Codex が collector 登録を nikki-san#636 でだけ挙げたのも、collector が
+あるのが nikki-san だけだから）。net-fetch 配布で private にも `ci-logs` 系が入り、native の deploy-logs 方式と併存する。
 
 学び: 「片方を直したらもう片方も直す」値（同一 allowlist の2コピー）は、AGENTS_COMMON「コードの重複に気づいたら
 共通部品化」の典型。ai-ops 内で同一内容を複数パスに置くなら symlink にして正本を1つに保つ（ops-sync-design の作法）。
