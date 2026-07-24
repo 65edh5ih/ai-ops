@@ -1,0 +1,44 @@
+[dry-run] would delete: ai-ops/intake-2026-07-02t043908-unify-task-history-done (last commit 2026-07-02)
+[dry-run] would delete: ai-ops/intake-2026-07-02t050100-unify-task-history-done (last commit 2026-07-02)
+[dry-run] would delete: ai-ops/intake-2026-07-02t094308-response-language-consistency (last commit 2026-07-02)
+[dry-run] would delete: ai-ops/intake-2026-07-05t024103-conform-local-docs-to-sop-format (last commit 2026-07-05)
+[dry-run] would delete: ai-ops/intake-2026-07-05t081143-conform-local-docs-to-sop-format (last commit 2026-07-05)
+[dry-run] would delete: ai-ops/intake-2026-07-06t230854-instruct-users-with-direct-urls (last commit 2026-07-07)
+[dry-run] would delete: ai-ops/intake-2026-07-08t220307-docs-present-tense-rule (last commit 2026-07-08)
+[dry-run] would delete: ai-ops/intake-2026-07-12t120114-d1-capacity-doc (last commit 2026-07-12)
+[dry-run] would delete: ai-ops/intake-2026-07-12t211736-d1-trigger-and-doc-discoverabili (last commit 2026-07-12)
+[dry-run] would delete: ai-ops/intake-2026-07-15t041137-report-accessed-urls (last commit 2026-07-15)
+[dry-run] would delete: ai-ops/intake-2026-07-16t232000-task-history-no-dated-links (last commit 2026-07-16)
+keep (newer than 7d): ai-ops/intake-2026-07-21t120000-add-componentization-rule
+keep (newer than 7d): claude/add-ai-agent-support-m3j5m5
+[dry-run] would delete: claude/agent-sop-evaluation-jwj6lw (last commit 2026-07-05)
+[dry-run] would delete: claude/agents-common-load-strategy-a6c21i (last commit 2026-06-30)
+[dry-run] would delete: claude/agents-symbolic-link-iydhys (last commit 2026-06-27)
+[dry-run] would delete: claude/ai-agent-connection-failures-mmrguq (last commit 2026-07-09)
+[dry-run] would delete: claude/ai-agent-rule-sharing-dz219y (last commit 2026-07-02)
+[dry-run] would delete: claude/ai-ops-collect-shared-dispatch-uts9qu (last commit 2026-06-27)
+[dry-run] would delete: claude/ai-ops-file-distribution-34szgr (last commit 2026-07-11)
+[dry-run] would delete: claude/ai-ops-history-rule (last commit 2026-06-27)
+keep (newer than 7d): claude/archive-merge-sort
+[dry-run] would delete: claude/batch-processing-token-savings-s6xqh8 (last commit 2026-07-08)
+[dry-run] would delete: claude/branch-discipline-guidelines-kza0op (last commit 2026-06-28)
+[dry-run] would delete: claude/cross-repo-access-rule (last commit 2026-06-28)
+[dry-run] would delete: claude/cross-repo-copypaste-instruction (last commit 2026-06-28)
+[dry-run] would delete: claude/design-doc-repo-access-d4tm7h (last commit 2026-06-27)
+[dry-run] would delete: claude/design-md-naming-w97tw4 (last commit 2026-06-28)
+[dry-run] would delete: claude/docs-standards-unification-uosoln (last commit 2026-07-13)
+[dry-run] would delete: claude/github-copilot-rules-2gqlul (last commit 2026-07-07)
+[dry-run] would delete: claude/history-recording-stop-hook (last commit 2026-06-28)
+[dry-run] would delete: claude/merged-branch-guard-shared (last commit 2026-07-12)
+[dry-run] would delete: claude/nodejs-20-deprecation-u9n3iw (last commit 2026-07-05)
+[dry-run] would delete: claude/openhands-agents-md-read-brmcbx (last commit 2026-07-07)
+keep (newer than 7d): claude/outbox-poll-3h
+[dry-run] would delete: claude/outbox-proposal-errors-warnings-lng4f9 (last commit 2026-06-27)
+keep (newer than 7d): claude/pr-template-discussion-xy5waa
+[dry-run] would delete: claude/rename-history-md-yv0xqo (last commit 2026-07-01)
+[dry-run] would delete: claude/task-history-archival-886r62 (last commit 2026-07-08)
+[dry-run] would delete: claude/task-history-window-jgjtm1 (last commit 2026-07-02)
+[dry-run] would delete: claude/workflow-execution-logs-ehy5g5 (last commit 2026-06-28)
+----
+candidates=36 deleted=0 skipped=5 dry_run=true age_days=7
+::notice::dry-run: 36 branch(es) would be deleted. Re-run with dry_run=false to delete.

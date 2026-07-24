@@ -1,0 +1,9 @@
+# branch-cleanup run metadata
+run_id=30074099842
+run_attempt=1
+commit_sha=2df985bc8fa44440bcd34eb008dde82e8a3ddffd
+trigger_event=workflow_dispatch
+actor=65edh5ih
+ref=main
+dry_run=true
+generated_at_utc=2026-07-24T07:01:59Z
