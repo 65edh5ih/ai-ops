@@ -54,9 +54,11 @@ redact_secrets() {
   for p in "${SECRET_PATTERNS[@]}"; do
     s="$(printf '%s' "$s" | sed -E "s/$p/[REDACTED-SECRET]/g")"
   done
+  # 伏字の境界は拒否パターン（SECRET_QUERY_KEYS）と揃える。拒否は key= を位置を問わず一致させるので、
+  # 伏字も ?/& 直後に限定しない（例: path;access_token=secret も伏字する。狭いと拒否した値が SAFE_URL に残る）。
   printf '%s' "$s" \
     | sed -E 's|(://)[^/?#@]*@|\1[REDACTED-USERINFO]@|' \
-    | sed -E 's/([?&](access_token|api_key|apikey|client_secret|password|token|authorization)=)[^&#]*/\1[REDACTED]/gI'
+    | sed -E 's/((access_token|api_key|apikey|client_secret|password|token|authorization)=)[^[:space:]&#;]*/\1[REDACTED]/gI'
 }
 # ファイルを in-place で伏字にする。PEM 秘密鍵は BEGIN 行だけでなく本文・END まで丸ごと（行単位の
 # sed だと BEGIN 行しか消えず base64 本文が残るため）。そのあと単一行に載る token 類を sed で伏字。
