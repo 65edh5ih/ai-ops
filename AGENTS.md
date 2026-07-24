@@ -49,6 +49,30 @@
   （設計と実装を乖離させない）。
 - `consumers.txt` を変えたら PAT のアクセス対象も合わせる。
 
+## 配布変更のダウンストリーム確認（shared/ を触ったら下流も見る）
+
+**配布に影響する変更**（`sync.yml` が同期 PR を生む入力: `shared/**`・`AGENTS_COMMON.md`・`sync-deletions.txt`。
+`tasks/**` は対象 consumer のみ）を含む PR がマージされると、`sync.yml` が各 consumer に同期 PR
+（head: `ai-ops/sync-common`）を生成し、**MERGE_MODE=direct なら数秒で自動マージ**される。Codex は**マージ後の
+同期 PR を数分後にレビューすることがあり**、ai-ops 本体の PR に出ず**consumer 同期 PR でだけ出る指摘**がある
+（例: net-fetch 配布時、注入・PEM・クエリの指摘が consumer 同期 PR でのみ出た）。取りこぼすと配布物の欠陥が全
+consumer に残る。
+
+- **上記の配布変更を含む PR を出したら、自分の PR を購読**（`subscribe_pr_activity`）し、**マージ後に consumer の
+  最新同期 PR を確認する**。対象は `consumers.txt` の各 repo・head `ai-ops/sync-common` の**最新 PR**。
+  - 通常は `direct` で即マージされるので、**マージ済み同期 PR の Codex レビュー・CI を見る**（マージ後数分は
+    Codex レビューが付きうるので `send_later` 等で数分あけて見る）。
+  - ただし branch protection・コンフリクト・権限などで **direct マージが失敗すると sync PR は open のまま残る**
+    （`sync.yml` は失敗を握って PR を残す）。なので**マージ済み・open のどちらでも**最新の `ai-ops/sync-common`
+    PR を確認する（open なら現状の Codex/CI、そもそも未マージという事実自体が要対応）。
+- consumer は別リポジトリなので、確認には `add_repo`（read）が要る。エージェント起点で勝手に追加せず、
+  **ユーザーに「`<owner>/<repo>` を追加して同期 PR を確認しますか？」と確認**してから追加する
+  （AGENTS_COMMON「リポジトリ横断の作業」に従う。ユーザー不在の自律実行では確認できないので次回の同席時に）。
+- **指摘があれば ai-ops 正本で直す**（`shared/` を再修正 → 新 PR → 再配布）。**consumer 同期 PR は手編集しない**
+  （次回同期で上書きされる）。同一ファイルを配る性質上、1回の正本修正で全 consumer 分が直る。
+- outbox 提案由来の変更（取り込み PR）は提案元セッションが居ないため、この確認は**取り込み PR を扱う
+  セッション**（オーナーのレビュー/マージ時）が同じ手順で行う。
+
 ## 履歴ファイル
 
 ai-ops での作業の「**なぜ**」（コードに無い制約・判断根拠）は **`docs/history-inbox/<YYYY-MM-DD>-<スラッグ>.md`**
