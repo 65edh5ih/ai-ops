@@ -27,3 +27,10 @@ slice 単位で publish する。このための composite action `.github/actio
 > collector・設計ドキュメントの**ファイル名や有無はリポジトリ固有**（各 `AGENTS.md` の固有パートに書く）。
 > 上記の「publish-ci-logs を組み込む」義務、および**2層の使い分け**（inline publish＝常時／フル生ログ
 > collector＝失敗時のみ）は全リポジトリ共通。
+
+> **collector 登録の例外**: **リクエスト単位で毎 run の一次情報を inline publish** するワークフロー
+> （現状 `net-fetch`。結果を `net-fetch/<request_id>/` に `if: always()` で常時公開）は、collector（手順4）に
+> **登録しない**。理由: (1) status/response の一次情報は inline に常時残る、(2) job 失敗は主に「取得先が到達
+> 不能」等の**期待される失敗**でインフラバグではなく、失敗ゲートの collector を毎回起こすのはノイズ・課金
+> （2026-07-18 の分逼迫と同種）。新規ワークフローがこの例外に当たるかは「毎 run 自前で一次情報を inline
+> publish し、失敗が想定内か」で判断する。手順3（inline publish）は例外なく全ワークフローで必須。
