@@ -58,6 +58,12 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
 > `unknown` のまま dispatch しない。枠切れ時の実行は run の失敗に留まらず、spending limit の設定次第で
 > **実費課金**につながる。
 
+> **既知の制限（2026-07-25 時点）**: このアカウントは enhanced billing platform 側で、そちらの API は
+> 金額ベースの明細しか返さないため **`state` が `unknown` のまま**になる（＝上記の手順により private repo
+> での自発 dispatch は常に止まる）。故障ではなく未実装。残作業は ai-ops の
+> `docs/reference/ACTIONS_QUOTA_NEXT_STEPS.md`。**`unknown` を見ても「壊れているから無視してよい」とは
+> 判断しないこと**（MUST NOT）——止まる挙動自体は意図どおり。
+
 ## 測定側の構成（読むだけの人は不要）
 
 - 測定は ai-ops の `actions-quota` workflow（`.github/workflows/actions-quota.yml` ＋
