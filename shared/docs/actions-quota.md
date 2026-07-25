@@ -58,12 +58,6 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
 > `unknown` のまま dispatch しない。枠切れ時の実行は run の失敗に留まらず、spending limit の設定次第で
 > **実費課金**につながる。
 
-> **既知の制限（2026-07-25 時点）**: このアカウントは enhanced billing platform 側で、そちらの API は
-> 金額ベースの明細しか返さないため **`state` が `unknown` のまま**になる（＝上記の手順により private repo
-> での自発 dispatch は常に止まる）。故障ではなく未実装。残作業は ai-ops の
-> `docs/reference/ACTIONS_QUOTA_NEXT_STEPS.md`。**`unknown` を見ても「壊れているから無視してよい」とは
-> 判断しないこと**（MUST NOT）——止まる挙動自体は意図どおり。
-
 ## 測定側の構成（読むだけの人は不要）
 
 - 測定は ai-ops の `actions-quota` workflow（`.github/workflows/actions-quota.yml` ＋
@@ -73,8 +67,16 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
   未設定なら `state=unknown` が publish され、上記の手順により安全側（実行しない）に倒れる。
 - しきい値は ai-ops の repo variable `ACTIONS_QUOTA_THRESHOLD_PCT` で変えられる（未設定なら 90）。
 - 旧 billing API（含有枠に対する使用分数が取れる）を優先し、取れないときは enhanced billing platform の
-  使用明細へフォールバックする。後者は金額しか出ないため「課金が発生＝`exhausted`」だけを判定でき、
-  未課金でも割合が不明なので `unknown`（＝安全側）を返す。
+  使用明細へフォールバックする。**enhanced 経路の現在の実装は課金額しか見ていない**ので、判定できるのは
+  「課金が発生＝`exhausted`」か「未課金だが割合は不明＝`unknown`（＝安全側）」の二択になる。
+  enhanced の応答から使用量を取り出して割合を出せるかは**未確認**（実レスポンスを見ていない）。
+- **このアカウントは enhanced 経路で動いている**（`quota/actions.json` の `source` が `enhanced:*`）。
+  したがって課金が発生していない限り `state` は `unknown` になり、上記の手順により private repo での
+  自発 dispatch は止まる。**これは故障ではなく未実装**であり、止まる挙動自体は意図どおりなので
+  **`unknown` を見て「壊れているから無視してよい」と判断しないこと**（MUST NOT）。
+  割合を出せるようにする手順:
+  [ai-ops の `docs/reference/ACTIONS_QUOTA_NEXT_STEPS.md`](https://github.com/65edh5ih/ai-ops/blob/main/docs/reference/ACTIONS_QUOTA_NEXT_STEPS.md)
+  （ai-ops ローカルの doc で consumer には配布されないため絶対 URL）。
 
 ## よくある失敗
 
