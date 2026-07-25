@@ -18,6 +18,14 @@
 - **エージェントに要る能力**: ai-ops をセッションから参照・編集できること、ai-ops の workflow を
   `workflow_dispatch` で起動できること、ai-ops の `ci-logs` ブランチを読めること。
   満たせないときは停止してユーザーに依頼する（MUST）。
+- **手順1（応答形の確認）には上記に加えて次の2つが要る**。どちらも**エージェントが自力で用意できない**
+  ので、無ければ**手順1に入る前に停止してユーザーに依頼する**（MUST）:
+  - **Plan: Read-only 権限の PAT を、この作業用に別途受け取ること**。登録済みの Actions secret
+    `ACTIONS_QUOTA_TOKEN` は**読み戻せない**ので流用できない（GitHub は secret の値を返さない）。
+  - **応答を見るための非公開の場所**。ai-ops の Actions run ログと `ci-logs` は世界公開なので、
+    生レスポンスをそこへ出してはいけない（MUST NOT）。ローカル実行でユーザーに出力だけ共有してもらうか、
+    private リポジトリで publish せずに確認するか、ユーザー自身に叩いてもらって形状だけ教えてもらう。
+    どれを採るかはユーザーと決める。
 - **現状の実測値**（2026-07-25・PAT 登録後の初回実行）:
   `{"state":"unknown","source":"enhanced:users","note":"enhanced billing API exposes cost, not % of included minutes; ..."}`
   → このアカウントは **enhanced billing platform 側**で、含有枠に対する使用分数を直接返す旧 API
