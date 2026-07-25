@@ -67,16 +67,15 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
   未設定なら `state=unknown` が publish され、上記の手順により安全側（実行しない）に倒れる。
 - しきい値は ai-ops の repo variable `ACTIONS_QUOTA_THRESHOLD_PCT` で変えられる（未設定なら 90）。
 - 旧 billing API（含有枠に対する使用分数が取れる）を優先し、取れないときは enhanced billing platform の
-  使用明細へフォールバックする。**enhanced 経路の現在の実装は課金額しか見ていない**ので、判定できるのは
-  「課金が発生＝`exhausted`」か「未課金だが割合は不明＝`unknown`（＝安全側）」の二択になる。
-  enhanced の応答から使用量を取り出して割合を出せるかは**未確認**（実レスポンスを見ていない）。
-- **このアカウントは enhanced 経路で動いている**（`quota/actions.json` の `source` が `enhanced:*`）。
-  したがって課金が発生していない限り `state` は `unknown` になり、上記の手順により private repo での
-  自発 dispatch は止まる。**これは故障ではなく未実装**であり、止まる挙動自体は意図どおりなので
-  **`unknown` を見て「壊れているから無視してよい」と判断しないこと**（MUST NOT）。
-  割合を出せるようにする手順:
-  [ai-ops の `docs/reference/ACTIONS_QUOTA_NEXT_STEPS.md`](https://github.com/65edh5ih/ai-ops/blob/main/docs/reference/ACTIONS_QUOTA_NEXT_STEPS.md)
-  （ai-ops ローカルの doc で consumer には配布されないため絶対 URL）。
+  使用明細（日次・SKU 別）へフォールバックして当月の Actions **分課金項目**を合計する。どちらの経路でも
+  使用率を出して `ok` / `tight` を判定する（`source` にどちらを使ったかが出る）。
+- **含有枠（分）はどちらの API も返さないので設定値で持つ**。ai-ops の repo variable
+  `ACTIONS_QUOTA_INCLUDED_MINUTES`（未設定なら 2,000＝GitHub Free）。**プランを変えたらこの値も更新する**
+  ——更新しないと使用率が実態とずれる（含有枠が増えたのに古い小さい値のままなら早めに `tight` に倒れ、
+  減ったのに大きい値のままなら `ok` を出しすぎる）。不正な値は `unknown` に倒れる。
+- enhanced 経路は **`unitType` が分の項目だけ**を数える。`Actions storage`（GigabyteHours）は含有枠が
+  別建てなので、storage の超過だけで `exhausted` にはならない。OS 別の課金倍率（Windows 2倍・macOS 10倍）は
+  SKU 名から掛け直して含有枠の消費として数える。
 
 ## よくある失敗
 

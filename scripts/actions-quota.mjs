@@ -9,6 +9,8 @@
 //   AQ_TOKEN        billing 読み取り権限のある PAT。未設定なら state=unknown で degrade（ジョブは失敗させない）
 //   AQ_ACCOUNT      対象アカウント（例: 65edh5ih）。この配下の private repo すべてが同じ月枠を共有する
 //   AQ_THRESHOLD    逼迫とみなす使用率(%)。既定 90
+//   AQ_INCLUDED_MINUTES  プランの含有枠（分）。既定 2000（GitHub Free）。billing API は含有枠を返さないため
+//                        設定値で持つ。プラン変更時は repo variable ACTIONS_QUOTA_INCLUDED_MINUTES で上書きする
 //   AQ_STALE_HOURS  消費側が「古すぎる」と判断すべき時間。既定 24（出力に埋めて自己記述にする）
 //   AQ_OUTPUT_DIR   出力先ディレクトリ（既定 actions-quota-out）
 //
@@ -38,6 +40,20 @@ const parsedThreshold = Number(rawThreshold);
 const thresholdValid = Number.isFinite(parsedThreshold) && parsedThreshold > 0 && parsedThreshold <= 100;
 // 公開する threshold_pct は必ず妥当な数にする（NaN は JSON.stringify で null になり消費側が読めない）
 const threshold = thresholdValid ? parsedThreshold : 90;
+
+// 含有枠（分）。billing API はどちらの経路でも「プランに含まれる枠」を返さないので設定値で持つ。
+// 既定は GitHub Free の 2,000 分。**しきい値と同じく壊れた値は unknown に倒す**（`Number('2OOO')` の
+// NaN で割ると使用率が NaN になり、`pct >= threshold` が常に false ＝ 使用率にかかわらず ok を出す
+// fail-open になる。この穴は AQ_THRESHOLD で実際に踏んでいる）。上限は sanity check——含有枠は最大でも
+// Enterprise の 50,000 分程度なので、桁違いの値（分と秒の取り違え等）は設定ミスとして弾く。
+const INCLUDED_MINUTES_MAX = 1_000_000;
+const rawIncluded = process.env.AQ_INCLUDED_MINUTES ?? '2000';
+const parsedIncluded = Number(rawIncluded);
+const includedValid =
+  String(rawIncluded).trim() !== '' &&
+  Number.isFinite(parsedIncluded) &&
+  parsedIncluded > 0 &&
+  parsedIncluded <= INCLUDED_MINUTES_MAX;
 
 const { writeFileSync, mkdirSync } = await import('node:fs');
 const { join } = await import('node:path');
@@ -105,21 +121,88 @@ for (const scope of ['users', 'orgs']) {
   emit(pct >= threshold ? 'tight' : 'ok', `legacy:${scope}`, `usage measured against included minutes`);
 }
 
-// 経路2（enhanced billing platform）: 移行済みアカウント向け。使用明細（金額ベース）しか無く
-// 「含有枠の何割か」は算出できないため、**課金が発生しているか（=含有枠超過）だけ**を見る。
-// 超過していない場合は割合が不明なので ok と断定せず unknown（＝安全側）に倒す。
+// 経路2（enhanced billing platform）: 移行済みアカウント向け。日次・SKU 別の使用明細から
+// **Actions の「分」課金項目だけ**を拾い、設定値の含有枠（AQ_INCLUDED_MINUTES）に対する割合を出す。
+//
+// **`quantity` は「素の実行分数」と解釈する**（OS 別の課金倍率は `pricePerUnit` 側に出ている）。
+// 根拠: 実レスポンスの `pricePerUnit` が SKU ごとの単価になっており（Linux の分単価が単独の値として
+// 出る）、GitHub の公表単価も Linux:Windows:macOS = 1:2:10 の比で、倍率は価格側で表現されている。
+// 含有枠の消費は**倍率込み**で数える（Windows 1分は含有枠を2分消費する）ので、ここで
+// `quantity × OS倍率` を掛け直す。**この解釈を取り違えると使用率が数倍ずれ、しかも数字を publish
+// しないので気づけない**——`quantity` が倍率換算済みだった場合、この実装は使用率を過大に見積もる
+// （＝早めに tight に倒れる安全側）。
+//
+// 分課金以外（`Actions storage` の GigabyteHours 等）は**含有枠が別建て**なので分子にも
+// 「課金発生＝exhausted」の判定にも混ぜない（artifact が溢れただけで自発 dispatch が
+// 恒久的に止まるのを避ける。分の枯渇は下の使用率と netAmount で直接見る）。
+
+// SKU 名から含有枠の消費倍率を得る。**未知の SKU は推測しない**（呼び出し側で unknown に倒す）。
+// larger runner（例 `Actions Linux 4-core`）は含有枠の対象外だが、名前が linux/windows/macos を
+// 含むので倍率1以上として数えられる＝使用率を過大に見積もる方向（安全側）に倒れる。
+function includedMinutesMultiplier(sku) {
+  const s = String(sku || '').toLowerCase();
+  if (/mac\s*os|macos/.test(s)) return 10;
+  if (/windows/.test(s)) return 2;
+  if (/linux/.test(s)) return 1;
+  return null;
+}
+
+const now = new Date();
+const year = now.getUTCFullYear();
+const month = now.getUTCMonth() + 1;
+// 月枠は暦月でリセットされる前提で当月分を数える（`year`/`month` クエリで API 側でも絞る）。
+const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+
 for (const scope of ['users', 'orgs']) {
-  const { status, body } = await api(`/${scope}/${account}/settings/billing/usage`);
+  const { status, body } = await api(`/${scope}/${account}/settings/billing/usage?year=${year}&month=${month}`);
   if (status !== 200 || !body) continue;
   const items = Array.isArray(body.usageItems) ? body.usageItems : [];
   const actions = items.filter((i) => String(i?.product || '').toLowerCase() === 'actions');
   if (!actions.length) {
     emit('unknown', `enhanced:${scope}`, 'no actions usage items in response');
   }
-  const netTotal = actions.reduce((sum, i) => sum + Number(i?.netAmount || 0), 0);
-  if (netTotal > 0) emit('exhausted', `enhanced:${scope}`, 'actions usage is being billed (included allowance exceeded)');
-  emit('unknown', `enhanced:${scope}`,
-    'enhanced billing API exposes cost, not % of included minutes; not billed yet but ratio unknown');
+
+  // クエリが効かなかった場合の保険（`date` は "2026-07-01T00:00:00Z" 形式）。日付の形が変わって
+  // 全件落ちたら下の minuteItems が空になり unknown に倒れる。
+  const thisMonth = actions.filter((i) => String(i?.date || '').startsWith(monthPrefix));
+  // `unitType` は実レスポンスが "Minutes"、docs の例は "minutes"。表記揺れで取りこぼさない。
+  const minuteItems = thisMonth.filter((i) => String(i?.unitType || '').toLowerCase() === 'minutes');
+
+  // 分課金項目に課金が乗っている＝含有枠を超過している。
+  const billed = minuteItems.reduce((sum, i) => sum + Number(i?.netAmount || 0), 0);
+  if (billed > 0) {
+    emit('exhausted', `enhanced:${scope}`, 'actions minutes are being billed (included allowance exceeded)');
+  }
+
+  // ここから先は「割合を出せるか」。出せない理由は全部 unknown（＝消費側は逼迫扱い）に落とす。
+  // 分課金項目が1件も無い月は「使用0」ではなく unknown にする: 使用0と「`unitType` の表記が変わって
+  // 全件落ちた」を区別できず、後者を ok と読むと**古い ok ではなく恒久的な誤 ok** になるため
+  // （月初に一時的に unknown が出る不便より、使用率にかかわらず ok を出す fail-open を嫌う）。
+  if (!minuteItems.length) {
+    emit('unknown', `enhanced:${scope}`, 'no minute-metered actions usage items for the current month');
+  }
+  if (!includedValid) {
+    emit('unknown', `enhanced:${scope}`,
+      `AQ_INCLUDED_MINUTES must be a number in (0, ${INCLUDED_MINUTES_MAX}]; got ${JSON.stringify(String(rawIncluded).slice(0, 40))}`);
+  }
+
+  let used = 0;
+  for (const item of minuteItems) {
+    const quantity = Number(item?.quantity);
+    const multiplier = includedMinutesMultiplier(item?.sku);
+    // note には SKU 名も数値も載せない（publish 先が世界公開。載せるのは失敗の種別だけ）
+    if (!Number.isFinite(quantity) || quantity < 0 || multiplier === null) {
+      emit('unknown', `enhanced:${scope}`, 'unrecognized sku or quantity in a minute-metered item; refusing to guess');
+    }
+    used += quantity * multiplier;
+  }
+
+  const pct = (used / parsedIncluded) * 100;
+  if (!Number.isFinite(pct)) {
+    emit('unknown', `enhanced:${scope}`, 'computed usage ratio is not a finite number');
+  }
+  emit(pct >= threshold ? 'tight' : 'ok', `enhanced:${scope}`,
+    'usage measured from minute-metered actions items against configured included minutes');
 }
 
 emit('unknown', 'none', 'both legacy and enhanced billing endpoints failed (check token permissions)');
