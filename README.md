@@ -50,6 +50,8 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 | `scripts/archive-task-history.mjs` | （保守）`docs/history-inbox/` のフラグメントを本体へ統合し、保持量超過分を `docs/history-archive/` へ移す |
 | `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ai-ops＋全 consumer を巡回し、未統合フラグメント／超過分の統合＋アーカイブPRを生成・マージ |
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer で削除済み）を自動で刈る |
+| `scripts/actions-quota.mjs` | （信号）billing API で Actions 月枠の使用率を測り、`ok`/`tight`/`exhausted`/`unknown` の粗い state に落とす |
+| `.github/workflows/actions-quota.yml` | （信号）cron（6時間ごと）で上記を実行し `ci-logs` の `quota/actions.json` へ publish。エージェントが private repo で workflow を回してよいかの判断に使う（手順: `shared/docs/actions-quota.md`） |
 
 ## セットアップ（1回だけ）
 
@@ -59,6 +61,11 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 2. 本リポジトリの Actions Secret に **`OPS_SYNC_TOKEN`** として登録。
 3. ai-ops の `main` にブランチ保護を掛ける（PAT による直 push の防止）。
 4. `AGENTS_COMMON.md` を main に置く（初回 push で workflow が走り、各 consumer へ配線PRが立つ）。
+5. **Actions 月枠の信号用に2本目の PAT を発行**（権限: **Account permissions → Plan: Read-only** のみ。
+   billing API は repo スコープでは読めないためアカウント権限が要る）。本リポジトリの Actions Secret に
+   **`ACTIONS_QUOTA_TOKEN`** として登録する。**未登録だと `quota/actions.json` が `unknown` のままになり、
+   全 consumer のエージェントが private repo での自発的な workflow 実行を止める**（安全側だが何も動かせない）。
+   しきい値を既定の 90% から変えるときは repo variable `ACTIONS_QUOTA_THRESHOLD_PCT` を設定する。
 
 consumer 側のセットアップは**不要**（workflow・Secret とも置かない）。
 

@@ -1,0 +1,121 @@
+name: Actions quota
+
+# GitHub Actions 月枠の逼迫状態を billing API で実測し、`ci-logs` ブランチの `quota/actions.json` へ
+# 粗い状態信号として公開する。エージェントは分散モードの net-fetch（private repo 実行）を使う前に
+# これを読み、`ok` 以外なら実行しない（手順: shared/docs/actions-quota.md）。
+#
+# **ai-ops でだけ動かす**（shared/ に置かず consumer へ配布しない）。理由:
+#   - Actions の月枠は **アカウント単位**で、`65edh5ih` 配下の private repo すべてが同じ枠を共有する。
+#     したがって測定は1箇所でよく、consumer ごとに測る意味がない。
+#   - ai-ops は public なのでこの workflow 自身の実行分は無料（枠を測るために枠を食う矛盾を避ける）。
+#   - consumer 側に billing PAT を配らずに済む（「consumer に常設トークンを増やさない」原則を守る）。
+#
+# secret `ACTIONS_QUOTA_TOKEN` が未設定なら state=unknown を publish して緑で終わる（consumer 側は
+# unknown を「逼迫と同じ扱い」にするので、未設定でも安全側に倒れる）。
+#
+# fork PR から secret に触れさせないため、トリガは schedule と workflow_dispatch だけにする
+# （pull_request 系のトリガを足さないこと）。
+
+on:
+  schedule:
+    - cron: '23 */6 * * *' # 6時間ごと。消費側の陳腐化許容は 24h（actions.json の stale_after_hours）
+  workflow_dispatch:
+
+permissions:
+  contents: write # publish-ci-logs が ci-logs ブランチへ結果を push するのに必要
+
+concurrency:
+  group: actions-quota
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Measure quota
+        id: measure
+        env:
+          # PAT はこのステップの env にだけ載せる（他ステップ・publish には渡さない）
+          AQ_TOKEN: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
+          AQ_ACCOUNT: ${{ github.repository_owner }}
+          # 閾値は repo variable で運用中に変えられる（未設定なら 90）
+          AQ_THRESHOLD: ${{ vars.ACTIONS_QUOTA_THRESHOLD_PCT || '90' }}
+          AQ_STALE_HOURS: '24'
+          AQ_OUTPUT_DIR: actions-quota-out
+        # ログは docs/ci-logs.md 手順2 のとおり logs/ci/scripts/<name>.log へ残す（unknown になった理由が
+        # 権限・応答形・ネットワークのどれかを後から切り分けるため）。スクリプトは常に exit 0 なので
+        # tee のステータスでジョブは落ちない（結果は必ず publish する方針。net-fetch と同じ）。
+        run: |
+          mkdir -p logs/ci/scripts
+          node scripts/actions-quota.mjs 2>&1 | tee logs/ci/scripts/actions-quota.log
+
+      # スクリプトが何らかの理由で actions.json を残せずに落ちた場合の保険。これが無いと publish が
+      # 何もせず、ci-logs に**前回の古い state が残り続ける**（消費側が古い ok を掴む fail-open）。
+      - name: Ensure a result exists (fail closed)
+        if: always()
+        env:
+          # 動的値を run: に ${{ }} で直接埋めない（GitHub が bash 実行前に展開するため注入経路になる。
+          # 全 workflow 共通の鉄則）。加えて非数値が JSON に混ざると actions.json が壊れて消費側が読めなくなる。
+          RAW_THRESHOLD: ${{ vars.ACTIONS_QUOTA_THRESHOLD_PCT || '90' }}
+        run: |
+          set -uo pipefail
+          f=actions-quota-out/actions.json
+          if [ ! -s "$f" ]; then
+            # 数字のみを採用し、それ以外（typo・空・記号）は既定 90 に落とす
+            thr="$RAW_THRESHOLD"
+            case "$thr" in ''|*[!0-9]*) thr=90 ;; esac
+            [ "$thr" -ge 1 ] 2>/dev/null && [ "$thr" -le 100 ] 2>/dev/null || thr=90
+            mkdir -p actions-quota-out
+            cat > "$f" << EOF
+          {
+            "state": "unknown",
+            "threshold_pct": $thr,
+            "stale_after_hours": 24,
+            "checked_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "source": "none",
+            "note": "measurement step did not produce a result"
+          }
+          EOF
+            echo "::warning::actions-quota: measurement produced no result; published state=unknown"
+          fi
+
+      - name: Summarize
+        if: always()
+        env:
+          STATE: ${{ steps.measure.outputs.state }}
+          SOURCE: ${{ steps.measure.outputs.source }}
+        run: |
+          set -uo pipefail
+          {
+            printf '## Actions quota\n\n'
+            printf -- '- state: **%s**\n' "${STATE:-unknown}"
+            printf -- '- source: `%s`\n' "${SOURCE:-none}"
+            printf -- '- published to: `quota/actions.json` on the `ci-logs` branch\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # docs/ci-logs.md 手順3。結果 JSON と同じ slice にスクリプトログも載せる。
+      # **publish 先（ai-ops の ci-logs）は世界公開なので、万一ログに token 形が混ざっても外に残さない**
+      # （スクリプトは token を出力しないが、保険として net-fetch と同じ伏字方針を適用する）。
+      - name: Stage CI log snapshot
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p actions-quota-out
+          if [ -f logs/ci/scripts/actions-quota.log ]; then
+            sed -E \
+              -e 's/gh[pousr]_[A-Za-z0-9]{20,}/[REDACTED-SECRET]/g' \
+              -e 's/github_pat_[A-Za-z0-9_]{20,}/[REDACTED-SECRET]/g' \
+              logs/ci/scripts/actions-quota.log > actions-quota-out/actions-quota.log
+          fi
+
+      - name: Publish result to ci-logs branch
+        if: always()
+        uses: ./.github/actions/publish-ci-logs
+        with:
+          source-dir: actions-quota-out
+          dest: quota
+          commit-message: "ci(actions-quota): ${{ steps.measure.outputs.state || 'unknown' }}"
+          token: ${{ github.token }}

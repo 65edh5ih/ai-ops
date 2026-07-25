@@ -143,6 +143,26 @@ consumer: エージェントが .ai-ops/outbox/<時刻>-<説明>.md を main に
   消えたものを自動で刈る（`prune-tombstones.mjs`。collect-outbox.yml に同居して、その実行が clone した
   全 consumer をそのまま判定に使う。機械的削除なので PR は自動マージ）。
 - **skill ミラーの自動生成**・**sync の cron 再適用**は保守バッチというより下りの一部（上記）。
+- **Actions 月枠の信号**（下記）
+
+#### Actions 月枠の信号
+
+GitHub Actions の月枠は**アカウント単位**で全 private リポジトリが共有する。エージェントが自発的に
+private repo の workflow を dispatch する経路（net-fetch の分散モード等）は、枠が尽きていると run の失敗に
+留まらず spending limit 設定次第で実費課金につながるため、実行前に読む信号を1つ用意する。
+
+`actions-quota.yml`（cron 6時間ごと）が `actions-quota.mjs` を実行し、billing API で測った使用率を
+`ok` / `tight` / `exhausted` / `unknown` の粗い state に落として `ci-logs` の `quota/actions.json` へ publish する。
+消費側の手順は `docs/actions-quota.md`（全 consumer へ配布）。
+
+- **ai-ops でだけ測る**（`shared/` に置かず consumer へ配布しない）: 枠はアカウント単位なので測定は1箇所で
+  足りる。ai-ops は public なので測定自体が枠を消費しない（枠を測るために枠を食う矛盾を避ける）。
+  consumer に billing PAT を配らずに済み、「consumer 側に workflow・Secret を置かない」原則とも整合する。
+- **生の使用分数・使用率は publish しない**: ai-ops の `ci-logs` は世界公開なので、band と閾値だけを出す。
+- **測れなければ必ず `unknown`**（＝消費側は逼迫扱い）。token 未設定・API 変更・ネットワーク断・応答形の
+  変化はすべてここに落ちる。スクリプトが結果を残せず落ちた場合に備え workflow 側にも `unknown` を書く
+  保険ステップがある——無いと publish が何もせず `ci-logs` に前回の古い `ok` が残り、消費側がそれを掴む
+  fail-open になる。
 
 #### タスク履歴の統合とアーカイブ
 
@@ -172,6 +192,7 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 | Secret | 置き場所 | 権限 | 用途 |
 |---|---|---|---|
 | `OPS_SYNC_TOKEN` | ai-ops のみ | ai-ops＋全 consumer / Contents:RW, PR:RW, Workflows:RW | 下り同期 PR・上り取り込み/掃除 PR の作成、consumer の読み取り |
+| `ACTIONS_QUOTA_TOKEN` | ai-ops のみ | アカウント / Plan: Read-only（repo スコープ不要） | Actions 月枠の使用率を billing API で測る（→ 下記「Actions 月枠の信号」） |
 
 > **Workflows:RW が要る理由**: `shared/.github/workflows/`（現状 `branch-cleanup.yml`・`net-fetch.yml`）を consumer へ配布するため。
 > GitHub は `.github/workflows/` 配下のファイルを Workflows 権限の無い PAT で push させないので、この権限が

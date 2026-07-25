@@ -1,0 +1,77 @@
+# Actions 月枠の逼迫判定（分散実行してよいかの信号）
+
+GitHub Actions の月枠が逼迫しているかを billing API で実測した結果を読み、**private リポジトリで
+workflow を走らせてよいか**を判断するための手順。枠は**アカウント単位**で、`65edh5ih` 配下の private
+リポジトリ（consumer）はすべて同じ枠を共有する。
+
+## いつ使うか（トリガ）
+
+- **net-fetch を分散モード（private リポジトリ自身で実行）で起動する前**（→ `docs/net-fetch.md`）。
+- そのほか、エージェント自身の判断で **private リポジトリの workflow を dispatch しようとするとき**。
+- 適用外: public リポジトリ（ai-ops）での実行は枠を消費しないので、この判定は要らない。
+  ユーザーが明示的に依頼した private リポジトリの通常作業（deploy 等）も対象外——ここが縛るのは
+  **エージェントが自発的に枠を消費しにいく場合**。
+
+## 前提・パラメータ
+
+- **信号の場所**: `65edh5ih/ai-ops` の **`ci-logs` ブランチ**の **`quota/actions.json`**。
+  public リポジトリなので認証なしで読める。
+- **中身**（自己記述。フィールドが増えても既存の意味は変えない）:
+
+  | フィールド | 意味 |
+  |---|---|
+  | `state` | `ok` / `tight` / `exhausted` / `unknown` のいずれか（下記） |
+  | `threshold_pct` | `tight` と判定した使用率のしきい値（既定 90） |
+  | `stale_after_hours` | この時間を過ぎた `checked_at` は古すぎるとみなす契約値（既定 24） |
+  | `checked_at` | 測定時刻（UTC・ISO8601） |
+  | `source` | 測定に使った API 経路（`legacy:*` / `enhanced:*` / `none`） |
+
+- **`state` の意味**:
+  - `ok` … 使用率が `threshold_pct` 未満。private リポジトリで走らせてよい。
+  - `tight` … 使用率が `threshold_pct` 以上。走らせない。
+  - `exhausted` … 含有枠を超過し課金が発生している。走らせない。
+  - `unknown` … 測定できなかった（PAT 未設定・API 変更・障害等）。**`tight` と同じ扱いにする**。
+- **生の使用分数・使用率は公開しない**（ai-ops の `ci-logs` は世界公開のため、粗い band だけを出す）。
+  実数が要るときはアカウントの billing 画面を見る。
+- **エージェントに要る能力**: `65edh5ih/ai-ops` の `ci-logs` ブランチのファイルを読めること
+  （認証不要。手段はランタイム依存で、`git fetch` でもコンテンツ取得 API でも公開 raw URL でもよい）。
+
+## 手順
+
+1. **`quota/actions.json` を読む**（上記の場所）。
+   - 完了条件: JSON が取得でき、`state` と `checked_at` が読めている。
+   - **ファイルが存在しない・取得に失敗した場合は `unknown` として扱う**（MUST）。存在しないことを
+     「まだ枠に余裕がある」と解釈しない（MUST NOT）。
+2. **鮮度を確認する**。`checked_at` が現在時刻より `stale_after_hours` 以上前なら、`state` の値に
+   かかわらず **`unknown` として扱う**（MUST）。
+   - 完了条件: 「有効な `state`」か「`unknown` 扱い」かが確定している。
+3. **判定に従う**。
+   - `ok` … 目的の workflow を private リポジトリで dispatch してよい。
+   - `tight` / `exhausted` / `unknown` … **private リポジトリで dispatch しない**（MUST NOT）。
+     停止して、ユーザーに状況と代替案（public な ai-ops での集約実行・手動取得・枠リセット後の再実行）を
+     提示して判断を仰ぐ（MUST）。
+   - 完了条件: dispatch したか、ユーザーに判断を仰いで停止したかのどちらかになっている。
+4. **`ok` 以外だったことを完了報告に書く**（MUST）。ユーザーが枠の状態を把握し、退避スイッチや
+   しきい値の調整を判断できるようにするため。
+
+> **この判定を回避しない**（MUST NOT）: 「1回だけだから」「短いジョブだから」を理由に `tight` /
+> `unknown` のまま dispatch しない。枠切れ時の実行は run の失敗に留まらず、spending limit の設定次第で
+> **実費課金**につながる。
+
+## 測定側の構成（読むだけの人は不要）
+
+- 測定は ai-ops の `actions-quota` workflow（`.github/workflows/actions-quota.yml` ＋
+  `scripts/actions-quota.mjs`）が6時間ごとに実行し、結果を `ci-logs` の `quota/` へ publish する。
+  **ai-ops でだけ動かす**（public なので測定自体が枠を消費しない・consumer に PAT を配らずに済む）。
+- 依存 secret: ai-ops の `ACTIONS_QUOTA_TOKEN`（billing 読み取り権限のある PAT）。
+  未設定なら `state=unknown` が publish され、上記の手順により安全側（実行しない）に倒れる。
+- しきい値は ai-ops の repo variable `ACTIONS_QUOTA_THRESHOLD_PCT` で変えられる（未設定なら 90）。
+- 旧 billing API（含有枠に対する使用分数が取れる）を優先し、取れないときは enhanced billing platform の
+  使用明細へフォールバックする。後者は金額しか出ないため「課金が発生＝`exhausted`」だけを判定でき、
+  未課金でも割合が不明なので `unknown`（＝安全側）を返す。
+
+## よくある失敗
+
+- **信号が無い＝余裕がある、と解釈する**: PAT 未設定・workflow 未実行・取得失敗はすべて `unknown` で、
+  意味は「逼迫しているかもしれない」。手順2・3のとおり実行しない側に倒す。
+- **`checked_at` を見ない**: 月枠は月初にリセットされ、使用は日中に伸びる。古い `ok` を根拠にしない。
