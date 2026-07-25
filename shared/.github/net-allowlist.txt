@@ -17,6 +17,7 @@
 v2.hysteria.network
 www.githubstatus.com
 docs.github.com
+developers.cloudflare.com
 live.staticflickr.com
 filedn.eu
 
