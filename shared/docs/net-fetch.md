@@ -44,15 +44,25 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
     （＝機微でない）では停止してユーザーに集約実行を依頼する**（MUST）。能力不足を分散モードで回避しない
     （MUST NOT。モードは可視性・機微性で選ぶ原則を崩し、public 相当の取得を private 枠・非公開 `ci-logs` に
     落とすため）。分散を使うのは取得内容が機微で分散が正しいときだけ。
-  - **枠残量をエージェントが自分で判定する手段は無い**（GitHub Actions の残枠は billing API 経由でしか取れず、
-    PAT 必須・アカウント単位・反映に遅延がある。環境変数等での即時参照は無い）。したがって「今は枠に余裕が
-    ある」と**エージェントが勝手に仮定しない**（MUST NOT）。
-  - **分散モードを使う前（＝機微取得でユーザーに private repo 実行を依頼する前）に、現在の Actions 枠に
-    余裕があるかをユーザーに確認する**（MUST。AskUserQuestion 等の yes/no でよい）。理由: private リポジトリの
-    月枠は他の workflow とも共有しており、過去に枠逼迫を実際に起こした実績がある（→ `docs/ci-logs.md`）。
-    枠が尽きた状態で dispatch すると run が失敗するだけでなく、アカウントの spending limit 設定次第では
-    無料枠超過の**実費課金**につながりうる。確認が取れない／「逼迫している」と言われたら、機微取得であっても
-    分散モードでの実行を強行しない——ユーザーに代替（手動取得・後日実行）を相談する。
+  - **枠残量そのもの（残り分数）を直接取得する手段は無い**（billing API は PAT 必須・アカウント単位・
+    反映に遅延がある）。ただし**「今まさに逼迫中か」は間接的に判定できることが多い**: このアカウントの
+    consumer リポジトリは、GitHub Actions 分が逼迫すると deploy 等を Cloudflare 等の代替先へ手動退避する
+    repo variable を運用している（例: nikki-san の `PAUSE_GH_DEPLOY` / `PAUSE_ADMIN_WORKER_DEPLOY`。
+    `vars.<NAME> == 'true'` で push 起点の deploy workflow をまるごと skip する実装）。この repo variable の
+    値を直接読む手段が無くても、**対象リポジトリの push 起点 deploy workflow の直近の run 一覧を見て、
+    conclusion が `skipped` 続きなら「枠逼迫で退避中」と判定してよい**（`actions_list`
+    `list_workflow_runs` で取得可能・追加の資格情報不要。2026-07-25 時点で nikki-san の `deploy.yml` の
+    直近複数 run がこれで確認できた）。同一アカウント配下の他 private リポジトリの Actions 分もこれと
+    同じ枠を共有するため、この判定は分散モードの可否判断に転用できる。
+  - **上記の間接判定ができないとき**（対象リポジトリにこの種の pause variable が無い・deploy workflow
+    自体が無い等）は、「今は枠に余裕がある」と**エージェントが勝手に仮定しない**（MUST NOT）。
+  - **分散モードを使う前（＝機微取得でユーザーに private repo 実行を依頼する前）に**、上記の間接判定を
+    まず試み、それでも確信が持てなければ現在の Actions 枠に余裕があるかを**ユーザーに確認する**
+    （MUST。AskUserQuestion 等の yes/no でよい）。理由: private リポジトリの月枠は他の workflow とも
+    共有しており、過去に枠逼迫を実際に起こした実績がある（→ `docs/ci-logs.md`）。枠が尽きた状態で
+    dispatch すると run が失敗するだけでなく、アカウントの spending limit 設定次第では無料枠超過の
+    **実費課金**につながりうる。「逼迫している」と判定・確認できたら、機微取得であっても分散モードでの
+    実行を強行しない——ユーザーに代替（手動取得・後日実行）を相談する。
   - **モードは可視性・機微性（将来は枠残量）だけで選ぶ**（MUST）。取得先が allowlist に無いこと・
     共通リスト追加の非同期手続き（提案→同期→マージ）を避けたいことを理由に、**分散モードへ切り替えない**
     （MUST NOT）。モード切り替えを allowlist の回避手段に使わない。

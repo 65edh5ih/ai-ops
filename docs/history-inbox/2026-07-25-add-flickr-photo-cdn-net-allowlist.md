@@ -14,10 +14,13 @@ collect cron待ち）と、`add_repo` を持つエージェントが ai-ops を�
 明示していなかったため誤って前者を選んだ。手順に優先順位を明記する修正を別途 shared-file として本PRに
 含めた。
 
-さらにユーザーから、ドメインの機微性とは別に GitHub Actions の月枠逼迫がある指摘を受けた。枠残量を
-エージェントが自分で判定する手段は無い（billing API はPAT必須・アカウント単位・遅延ありで、環境変数
-等の即時参照は無いことを2026-07-23の設計時点で確認済み・今回再確認）。分散モード（private repo実行）
-は枠を消費し、枠が尽きた状態での dispatch は run失敗だけでなく spending limit 設定次第で実費課金に
-つながりうる。そこで「分散モードを使う前に必ずユーザーへ枠の余裕を確認する（MUST）」を net-fetch.md に
-追記した。エージェント自身による自動判定ではなく都度のユーザー確認にしたのは、ライブな枠残量シグナルが
-存在しないため（quota-gateは今後の課題として残る）。
+さらにユーザーから、ドメインの機微性とは別に GitHub Actions の月枠逼迫がある指摘を受けた。枠残量その
+ものを直接取得する手段は無い（billing API はPAT必須・アカウント単位・遅延あり）が、ユーザーの再指摘で
+「間接判定は可能」と気付いた: このアカウントの consumer リポジトリは枠逼迫時にdeployをCloudflare側へ
+手動退避する repo variable を運用しており（nikki-sanの`PAUSE_GH_DEPLOY`/`PAUSE_ADMIN_WORKER_DEPLOY`）、
+変数の値を直接読めなくても、対象repoのpush起点deploy workflowの直近runがconclusion=skipped続きなら
+「枠逼迫で退避中」と判定できる（`list_workflow_runs`で取得可能・追加の資格情報不要）。実際に nikki-san
+の`deploy.yml`を確認したところ直近複数runが軒並みskippedで、現在まさに逼迫中と確認できた。同一
+アカウント配下の他privateリポジトリもActions枠を共有するため、この判定は分散モードの可否判断に転用
+できる。net-fetch.md に「間接判定をまず試み、それでも確信が持てなければユーザーに確認する」形で追記した
+（判定できないリポジトリでは引き続きユーザー確認が必須）。quota-gateの自動化自体は今後の課題として残る。
