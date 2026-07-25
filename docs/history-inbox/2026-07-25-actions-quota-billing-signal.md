@@ -33,3 +33,22 @@ net-fetch.md に書いたが、ユーザーから「間接判断は危ない」�
 検証: billing API をスタブして8ケース実駆動（85%→ok / 89.95%→ok / 90.0%ちょうど→tight /
 97.5%→tight / 課金発生→exhausted / 0%→ok / 閾値80に変えて85%→tight / 応答破損→unknown）。
 token 未設定・不正tokenの degrade も実行して `unknown` を確認。
+
+### Codex レビューで塞いだ穴（いずれも「安全側に倒すはずが倒れない」系）
+
+- **しきい値の typo で fail-open（P1）**: `Number('9O')` は `NaN` で `pct >= NaN` が常に false になり、
+  **使用率にかかわらず `ok` を publish していた**。100超の値も同じく判定が発火しない。しきい値は
+  private repo の dispatch を認可する値なので、`(0,100]` の有限数以外は `unknown` に倒すよう検証を追加。
+  併せて `threshold_pct` に必ず妥当な数を載せる（`NaN` は `JSON.stringify` で `null` になり消費側が読めない）。
+- **workflow の `run:` に `${{ vars.* }}` を直接埋めていた**: このリポジトリの鉄則（注入経路になる）違反で、
+  かつ非数値が混ざると actions.json が壊れて消費側が読めなくなる。env 経由＋数値サニタイズに変更。
+- **CI ログを残していなかった（P2）**: `docs/ci-logs.md` の手順2-3（`logs/ci/scripts/<name>.log` への tee と
+  snapshot の publish）は「例外なく全ワークフローで必須」。net-fetch の例外は collector 登録（手順4）だけで
+  ログ出力の免除ではない、と読み違えていた。`unknown` の理由（権限/応答形/ネットワーク）を切り分けるには
+  ログが要る。publish 先が世界公開なので token 形の伏字も入れた。
+- **SOP の導線不足（P1）**: doc のトリガを「private repo の workflow を自発 dispatch するとき」と
+  net-fetch より広く書いたのに、導線が net-fetch.md からのリンクだけだった。広いトリガに合わせて
+  `AGENTS_COMMON.md` の1節と skill ラッパーを追加。
+- **正本 doc の更新漏れ（P1）**: 新 secret を足したのに README のセットアップ手順と ops-sync-design の
+  Secret 表を直しておらず、再構築時に `ACTIONS_QUOTA_TOKEN` が未設定のまま＝全 consumer の自発 dispatch が
+  永久に止まる状態になっていた。AGENTS.md の完了手順（仕組みを変えたら両 doc を更新）どおり反映。

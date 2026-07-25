@@ -45,21 +45,34 @@ jobs:
           AQ_THRESHOLD: ${{ vars.ACTIONS_QUOTA_THRESHOLD_PCT || '90' }}
           AQ_STALE_HOURS: '24'
           AQ_OUTPUT_DIR: actions-quota-out
-        run: node scripts/actions-quota.mjs
+        # ログは docs/ci-logs.md 手順2 のとおり logs/ci/scripts/<name>.log へ残す（unknown になった理由が
+        # 権限・応答形・ネットワークのどれかを後から切り分けるため）。スクリプトは常に exit 0 なので
+        # tee のステータスでジョブは落ちない（結果は必ず publish する方針。net-fetch と同じ）。
+        run: |
+          mkdir -p logs/ci/scripts
+          node scripts/actions-quota.mjs 2>&1 | tee logs/ci/scripts/actions-quota.log
 
       # スクリプトが何らかの理由で actions.json を残せずに落ちた場合の保険。これが無いと publish が
       # 何もせず、ci-logs に**前回の古い state が残り続ける**（消費側が古い ok を掴む fail-open）。
       - name: Ensure a result exists (fail closed)
         if: always()
+        env:
+          # 動的値を run: に ${{ }} で直接埋めない（GitHub が bash 実行前に展開するため注入経路になる。
+          # 全 workflow 共通の鉄則）。加えて非数値が JSON に混ざると actions.json が壊れて消費側が読めなくなる。
+          RAW_THRESHOLD: ${{ vars.ACTIONS_QUOTA_THRESHOLD_PCT || '90' }}
         run: |
           set -uo pipefail
           f=actions-quota-out/actions.json
           if [ ! -s "$f" ]; then
+            # 数字のみを採用し、それ以外（typo・空・記号）は既定 90 に落とす
+            thr="$RAW_THRESHOLD"
+            case "$thr" in ''|*[!0-9]*) thr=90 ;; esac
+            [ "$thr" -ge 1 ] 2>/dev/null && [ "$thr" -le 100 ] 2>/dev/null || thr=90
             mkdir -p actions-quota-out
             cat > "$f" << EOF
           {
             "state": "unknown",
-            "threshold_pct": ${{ vars.ACTIONS_QUOTA_THRESHOLD_PCT || '90' }},
+            "threshold_pct": $thr,
             "stale_after_hours": 24,
             "checked_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "source": "none",
@@ -82,6 +95,21 @@ jobs:
             printf -- '- source: `%s`\n' "${SOURCE:-none}"
             printf -- '- published to: `quota/actions.json` on the `ci-logs` branch\n'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # docs/ci-logs.md 手順3。結果 JSON と同じ slice にスクリプトログも載せる。
+      # **publish 先（ai-ops の ci-logs）は世界公開なので、万一ログに token 形が混ざっても外に残さない**
+      # （スクリプトは token を出力しないが、保険として net-fetch と同じ伏字方針を適用する）。
+      - name: Stage CI log snapshot
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p actions-quota-out
+          if [ -f logs/ci/scripts/actions-quota.log ]; then
+            sed -E \
+              -e 's/gh[pousr]_[A-Za-z0-9]{20,}/[REDACTED-SECRET]/g' \
+              -e 's/github_pat_[A-Za-z0-9_]{20,}/[REDACTED-SECRET]/g' \
+              logs/ci/scripts/actions-quota.log > actions-quota-out/actions-quota.log
+          fi
 
       - name: Publish result to ci-logs branch
         if: always()

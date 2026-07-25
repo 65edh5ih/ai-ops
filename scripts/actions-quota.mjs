@@ -27,9 +27,17 @@ const API = 'https://api.github.com';
 
 const token = process.env.AQ_TOKEN || '';
 const account = process.env.AQ_ACCOUNT || '';
-const threshold = Number(process.env.AQ_THRESHOLD || '90');
 const staleHours = Number(process.env.AQ_STALE_HOURS || '24');
 const outDir = process.env.AQ_OUTPUT_DIR || 'actions-quota-out';
+
+// **しきい値は private repo の dispatch を認可する値なので、壊れていたら必ず unknown に倒す**。
+// 素の Number() だと typo（例 `9O`）が NaN になり `pct >= NaN` が常に false ＝ 使用率にかかわらず
+// ok を publish する fail-open になる。100 超の値も同じく判定が発火しなくなる。
+const rawThreshold = process.env.AQ_THRESHOLD ?? '90';
+const parsedThreshold = Number(rawThreshold);
+const thresholdValid = Number.isFinite(parsedThreshold) && parsedThreshold > 0 && parsedThreshold <= 100;
+// 公開する threshold_pct は必ず妥当な数にする（NaN は JSON.stringify で null になり消費側が読めない）
+const threshold = thresholdValid ? parsedThreshold : 90;
 
 const { writeFileSync, mkdirSync } = await import('node:fs');
 const { join } = await import('node:path');
@@ -74,6 +82,10 @@ async function api(path) {
   }
 }
 
+if (!thresholdValid) {
+  emit('unknown', 'none',
+    `AQ_THRESHOLD must be a number in (0, 100]; got ${JSON.stringify(String(rawThreshold).slice(0, 40))}`);
+}
 if (!token) emit('unknown', 'none', 'AQ_TOKEN is not set; cannot measure quota');
 if (!account) emit('unknown', 'none', 'AQ_ACCOUNT is not set');
 
