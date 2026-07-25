@@ -69,10 +69,12 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
 - 旧 billing API（含有枠に対する使用分数が取れる）を優先し、取れないときは enhanced billing platform の
   使用明細（日次・SKU 別）へフォールバックして当月の Actions **分課金項目**を合計する。どちらの経路でも
   使用率を出して `ok` / `tight` を判定する（`source` にどちらを使ったかが出る）。
-- **含有枠（分）はどちらの API も返さないので設定値で持つ**。ai-ops の repo variable
-  `ACTIONS_QUOTA_INCLUDED_MINUTES`（未設定なら 2,000＝GitHub Free）。**プランを変えたらこの値も更新する**
-  ——更新しないと使用率が実態とずれる（含有枠が増えたのに古い小さい値のままなら早めに `tight` に倒れ、
-  減ったのに大きい値のままなら `ok` を出しすぎる）。不正な値は `unknown` に倒れる。
+- **含有枠（分）の出どころは経路で違う**。旧 API 経路は API が返す値（`included_minutes`）をそのまま使う。
+  enhanced 経路は API が含有枠を返さないので、ai-ops の repo variable `ACTIONS_QUOTA_INCLUDED_MINUTES`
+  （未設定なら 2,000＝GitHub Free）を使う。**プランを変えたらこの値も更新する（MUST）**——enhanced 経路では
+  設定値がそのまま分母になるので、更新しないと使用率が実態とずれる（含有枠が増えたのに古い小さい値のままなら
+  早めに `tight` に倒れ、減ったのに大きい値のままなら `ok` を出しすぎて課金される dispatch を通してしまう）。
+  不正な値は `unknown` に倒れる。
 - enhanced 経路は **`unitType` が分の項目だけ**を数える。`Actions storage`（GigabyteHours）は含有枠が
   別建てなので、storage の超過だけで `exhausted` にはならない。OS 別の課金倍率（Windows 2倍・macOS 10倍）は
   SKU 名から掛け直して含有枠の消費として数える。

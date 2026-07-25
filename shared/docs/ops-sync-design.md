@@ -159,9 +159,10 @@ private repo の workflow を dispatch する経路（net-fetch の分散モー�
   足りる。ai-ops は public なので測定自体が枠を消費しない（枠を測るために枠を食う矛盾を避ける）。
   consumer に billing PAT を配らずに済み、「consumer 側に workflow・Secret を置かない」原則とも整合する。
 - **生の使用分数・使用率は publish しない**: ai-ops の `ci-logs` は世界公開なので、band と閾値だけを出す。
-- **含有枠は設定値で持つ**（repo variable `ACTIONS_QUOTA_INCLUDED_MINUTES`・既定 2,000＝Free）: billing API は
-  どちらの経路も「プランに含まれる枠」を返さないため。プラン変更時はこの値の更新が要る。壊れた値は
-  既定へ黙って戻さず `unknown` に倒す（設定したつもりの枠と違う枠で測った `ok` を publish しないため）。
+- **含有枠の出どころは経路で違う**: 旧 API は `included_minutes` を返すのでそれを使う。enhanced billing
+  platform は返さないので repo variable `ACTIONS_QUOTA_INCLUDED_MINUTES`（既定 2,000＝Free）を使う
+  ＝**enhanced 経路ではプラン変更時にこの値の更新が要る**。壊れた値は既定へ黙って戻さず `unknown` に
+  倒す（設定したつもりの枠と違う枠で測った `ok` を publish しないため）。
 - **測れなければ必ず `unknown`**（＝消費側は逼迫扱い）。token 未設定・API 変更・ネットワーク断・応答形の
   変化はすべてここに落ちる。スクリプトが結果を残せず落ちた場合に備え workflow 側にも `unknown` を書く
   保険ステップがある——無いと publish が何もせず `ci-logs` に前回の古い `ok` が残り、消費側がそれを掴む

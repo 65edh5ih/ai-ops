@@ -67,8 +67,8 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
    全 consumer のエージェントが private repo での自発的な workflow 実行を止める**（安全側だが何も動かせない）。
    しきい値を既定の 90% から変えるときは repo variable `ACTIONS_QUOTA_THRESHOLD_PCT` を設定する。
    **プランの含有枠が GitHub Free の 2,000 分でないときは repo variable `ACTIONS_QUOTA_INCLUDED_MINUTES` に
-   実際の分数を設定する**（billing API は含有枠を返さないため設定値で持つ。ずれたままだと使用率が実態と
-   合わない）。
+   実際の分数を設定する**（enhanced billing platform の API は含有枠を返さないため設定値で持つ。旧 API が
+   使えるアカウントは API の値を使うのでこの設定は不要）。
 
 consumer 側のセットアップは**不要**（workflow・Secret とも置かない）。
 
