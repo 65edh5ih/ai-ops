@@ -34,3 +34,17 @@ slice 単位で publish する。このための composite action `.github/actio
 > 不能」等の**期待される失敗**でインフラバグではなく、失敗ゲートの collector を毎回起こすのはノイズ・課金
 > （2026-07-18 の分逼迫と同種）。新規ワークフローがこの例外に当たるかは「毎 run 自前で一次情報を inline
 > publish し、失敗が想定内か」で判断する。手順3（inline publish）は例外なく全ワークフローで必須。
+
+## CI の失敗を調査するとき（まずここを見る）
+
+ログを読み始める前に、**その run でジョブが実際に走ったか**を確認する。
+
+- **run が `failure` でも「ジョブ0件・課金0分」なら、workflow 側の不具合ではない**（ジョブが起動して
+  いない＝`if:` もステップも評価されていない）。この状態で workflow の中身を疑って調査しない（MUST NOT）。
+  原因は GitHub 側の内部エラー（run ページに `Internal server error. Correlation ID: …` が出る）か、
+  アカウント側の実行拒否（枠切れ・spending limit）のどちらか。
+- 見分け方: run のジョブ一覧が空で、run の usage（billable）も空。**どちらの原因かは run ページの
+  表示でしか分からない**ので、API のジョブ一覧だけを見て推測で断定しない（MUST NOT）。
+- 対処: 内部エラーなら一過性なので再実行してよい。アカウント側なら復旧を待つ
+  （→ `docs/actions-quota.md`）。**同じ push で複数の workflow が同時に同じ壊れ方をしていれば
+  アカウント側の可能性が高い**が、これも run ページの文言で裏を取る。
