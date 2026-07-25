@@ -5,6 +5,244 @@ ai-ops での作業の「**なぜ**」の記録。書き方・アーカイブは
 
 ---
 
+## 2026-07-25 Actions月枠の逼迫を billing API で実測する共通基盤を追加
+
+同セッションで一度「deploy workflow の run が `skipped` 続きかで枠逼迫を間接判定してよい」と
+net-fetch.md に書いたが、ユーザーから「間接判断は危ない」と却下された。妥当な指摘で、あの判定は
+**ユーザーが退避スイッチ（`PAUSE_GH_DEPLOY` 等）を入れ忘れていれば「余裕あり」と誤読する**——
+逼迫の検出を人間の運用手順の副作用に依存させており、本当に危険なときほど外す。実測に置き換えた。
+
+設計判断（コードに残らない前提）:
+
+- **ai-ops でだけ測る**（`shared/` に置かず consumer へ配布しない）。Actions の月枠は**アカウント単位**で
+  `65edh5ih` 配下の private repo が全部同じ枠を共有するので測定は1箇所でよい。加えて ai-ops は public
+  なので測定自体が枠を食わない（枠を測るために枠を消費する矛盾を避ける）。consumer に billing PAT を
+  配らずに済むのも効く（「consumer に常設トークンを増やさない」原則）。
+- **公開先が world-public なので生の使用分数・使用率を出さない**。ai-ops の `ci-logs` は世界公開で、
+  アカウントのCI使用状況が晒される。`ok`/`tight`/`exhausted`/`unknown` の band と閾値だけで
+  「9割超えたら分散モードを使わない」ルールは成立するため、実数はアカウントの billing 画面に留める。
+- **測れなかったら必ず安全側**。token 未設定・API 変更・ネットワーク断・応答形の変化は全部 `unknown` で、
+  消費側は `unknown` を `tight` と同じ扱いにする。実装でも2重に塞いだ: (1) `fetch` を try/catch して
+  例外で落ちないようにし、(2) それでもスクリプトが結果を残せず落ちた場合に備え workflow 側で
+  `unknown` を書く保険ステップを置いた。**これが無いと `ci-logs` に前回の古い `ok` が残り続け、
+  消費側が古い ok を掴む fail-open になる**（publish-ci-logs は source-dir が無いと何もせず緑で終わるため）。
+- **鮮度も契約に入れた**（`stale_after_hours`・既定24h）。月枠は月初にリセットされ日中に伸びるので、
+  古い `ok` を根拠にさせない。ファイル自身に閾値と鮮度を埋めて自己記述にしてある。
+- **旧 billing API 優先・enhanced はフォールバック**。「含有枠の何割か」を直接返すのは旧 API だけで、
+  enhanced billing platform は金額ベースの明細しか無い。後者では「課金発生＝含有枠超過＝`exhausted`」
+  しか断定できず、未課金でも割合は不明なので `ok` と断定せず `unknown` に倒す。どちらの経路が
+  このアカウントで生きているかは docs を読んでも確定できなかったため、**両方試して実測で決まる**
+  実装にした（初回実行の `source` フィールドに出る）。
+
+閾値90%はユーザー指定。運用中に変えられるよう ai-ops の repo variable
+`ACTIONS_QUOTA_THRESHOLD_PCT` で上書き可能にした（未設定なら90）。
+
+検証: billing API をスタブして8ケース実駆動（85%→ok / 89.95%→ok / 90.0%ちょうど→tight /
+97.5%→tight / 課金発生→exhausted / 0%→ok / 閾値80に変えて85%→tight / 応答破損→unknown）。
+token 未設定・不正tokenの degrade も実行して `unknown` を確認。
+
+### Codex レビューで塞いだ穴（いずれも「安全側に倒すはずが倒れない」系）
+
+- **しきい値の typo で fail-open（P1）**: `Number('9O')` は `NaN` で `pct >= NaN` が常に false になり、
+  **使用率にかかわらず `ok` を publish していた**。100超の値も同じく判定が発火しない。しきい値は
+  private repo の dispatch を認可する値なので、`(0,100]` の有限数以外は `unknown` に倒すよう検証を追加。
+  併せて `threshold_pct` に必ず妥当な数を載せる（`NaN` は `JSON.stringify` で `null` になり消費側が読めない）。
+- **workflow の `run:` に `${{ vars.* }}` を直接埋めていた**: このリポジトリの鉄則（注入経路になる）違反で、
+  かつ非数値が混ざると actions.json が壊れて消費側が読めなくなる。env 経由＋数値サニタイズに変更。
+- **CI ログを残していなかった（P2）**: `docs/ci-logs.md` の手順2-3（`logs/ci/scripts/<name>.log` への tee と
+  snapshot の publish）は「例外なく全ワークフローで必須」。net-fetch の例外は collector 登録（手順4）だけで
+  ログ出力の免除ではない、と読み違えていた。`unknown` の理由（権限/応答形/ネットワーク）を切り分けるには
+  ログが要る。publish 先が世界公開なので token 形の伏字も入れた。
+- **SOP の導線不足（P1）**: doc のトリガを「private repo の workflow を自発 dispatch するとき」と
+  net-fetch より広く書いたのに、導線が net-fetch.md からのリンクだけだった。広いトリガに合わせて
+  `AGENTS_COMMON.md` の1節と skill ラッパーを追加。
+- **正本 doc の更新漏れ（P1）**: 新 secret を足したのに README のセットアップ手順と ops-sync-design の
+  Secret 表を直しておらず、再構築時に `ACTIONS_QUOTA_TOKEN` が未設定のまま＝全 consumer の自発 dispatch が
+  永久に止まる状態になっていた。AGENTS.md の完了手順（仕組みを変えたら両 doc を更新）どおり反映。
+
+## 2026-07-25 含有枠の出どころを経路ごとに正す（consumer 同期 PR の Codex 指摘）
+
+ai-ops#87 で「含有枠はどちらの API も返さないので設定値で持つ」と書いたが**誤り**。旧 billing API は
+`included_minutes` を返し、コードもそれを使っている（設定値を分母にするのは enhanced 経路だけ）。
+doc だけが実装と食い違っていた。放置すると「旧 API が使えるアカウントでも設定値を合わせないと
+誤判定する」と読まれ、無用な変数設定を促すか、逆に旧 API の実値が無視されていると誤解される。
+
+あわせて「プランを変えたらこの値も更新する」を **MUST** に格上げした。`docs/sop-format.md` が
+「キーワードの付いていない文は説明であって要求ではない、という前提で読まれる」と定めているため、
+太字の地の文では要求として読まれない。この値が古いまま大きすぎると `ok` を出しすぎ、
+課金される dispatch を通してしまうので、強度は MUST が正しい。
+
+**この2件は ai-ops 本体の PR には出ず、consumer 同期 PR（nikki-san#669）にだけ Codex 指摘として出た。**
+AGENTS.md の「配布変更のダウンストリーム確認」が想定しているとおりの取りこぼし経路で、
+マージ後に同期 PR を見に行っていなければ全 consumer に誤った doc が残っていた。
+
+## 2026-07-25 Actions月枠の実測は enhanced billing 側で未完（unknown 固定）と判明
+
+PAT 登録後の初回実測で `source: enhanced:users` が判明。**このアカウントは enhanced billing platform 側**で、
+含有枠に対する使用分数を直接返す旧 API が使えない。enhanced API は金額ベースの明細しか返さないため、
+実装の enhanced 経路は「課金発生＝exhausted / 未課金＝unknown」の二択しか出せず、**当初要件（9割超えで
+止める）を満たしていない**。
+
+放置の是非: `unknown` は安全側（逼迫扱い）に倒れるので危険はないが、private repo での自発 dispatch が
+永久に止まる。安全だが何も動かせない状態なので残作業として明示した。
+
+残作業と壊してはいけない不変条件は `docs/reference/ACTIONS_QUOTA_NEXT_STEPS.md` に切り出した
+（別セッションへの引き継ぎ用に1ファイルへ集約。パスだけ渡せば cold start でも追えるようにした）。
+併せて配布 doc `shared/docs/actions-quota.md` にも既知の制限として注記した——消費側が `unknown` を見て
+「壊れているから無視してよい」と誤判断すると fail-closed の意味が消えるため、止まる挙動自体は意図どおりだと
+明記している。
+
+学び: 「どちらの API 経路が生きているか」は docs からは確定できず、**実際に叩くまで分からなかった**
+（docs.github.com は enterprise-cloud 版へリダイレクトする）。両方試して source を記録する実装にしておいた
+ことで、PAT 登録の初回実行だけで確定できた。外部 API の分岐は推測で片方に決め打ちせず、実測で確定する
+作りにしておくと後が楽。
+
+## 2026-07-25 引き継ぎdocを SOP 化し、「未確認の仮説を断定で書いた」矛盾を正した
+
+ai-ops#85 で作った `docs/reference/ACTIONS_QUOTA_NEXT_STEPS.md` への Codex レビュー3件に対応。
+うち1件は**自分が書いた2つの文書が矛盾している**という指摘で、根っこは確認していないことを断定で
+書いたことだった。
+
+- **矛盾（P2・最重要）**: 配布 doc には「enhanced API は金額ベースの明細しか返さない」と書き、
+  引き継ぎ doc には「`usageItems[]` の `quantity` を合算すれば分数が出るはず」と書いていた。前者は
+  「割合算出は原理的に不可能」と読め、後者の計画と食い違う。**実際に確定しているのは「現在の実装が
+  金額しか見ていない」ことだけ**で、`quantity` の有無は実レスポンスを見ていないので未確認。両 doc とも
+  「確定/未確認」を書き分ける形に直し、手順1で確定させてから実装に進む構成にした。
+  教訓: 外部 API の応答形を推測で断定しない。断定は実測した事実にだけ使う。
+- **SOP 化（P1）**: cold start のエージェントに実装させる目的の doc なので `docs/sop-format.md` が適用される。
+  散文の「やること」を、トリガ・前提・番号付き6ステップ（各ステップに検証可能な完了条件）・よくある失敗の
+  構成に書き直した。最終ステップに「この doc 自体の削除提案」と「配布 doc の既知の制限注記の更新」を
+  入れてある——直ったのに注記が残る/直らないのに消える、のどちらも防ぐため。
+- **consumer から辿れないリンク（P2）**: 配布 doc から `docs/reference/...` をリポジトリ相対で参照していたが、
+  この doc は ai-ops ローカルで consumer には配布されない。consumer のエージェントが自分の repo を探して
+  見つからない状態だったので、public な ai-ops の絶対 URL に変えた。**`shared/` から ai-ops ローカルの
+  パスを相対参照しない**（配布先で壊れる）。
+
+### 追記: 既存ルール「配布変更のダウンストリーム確認」を実行し忘れた
+
+ai-ops 本体の PR には出ず、**nikki-san#667 / private#421 の同期PRにだけ**追加指摘が出た。
+
+**これは新しい発見ではない。** `AGENTS.md`「配布変更のダウンストリーム確認（shared/ を触ったら下流も見る）」
+（52-64行目）に、この事象も対処も既に書いてある——「Codex は**マージ後の同期 PR を数分後にレビューする
+ことがあり**、ai-ops 本体の PR に出ず consumer 同期 PR でだけ出る指摘がある」「マージ後に consumer の
+最新同期 PR を確認する」、過去に net-fetch 配布で同じことが起きた実例まで載っている。**そのルールを
+実行しなかった**のが今回の問題で、ユーザーに指摘されて初めて見に行った。
+
+- **事実誤り（private#421・P2）**: 配布 doc の注記に「`state` が `unknown` のまま」と書いたが、
+  enhanced 経路でも**課金が検出されれば `exhausted` を出す**ので偽。正しい契約は「課金検出＝`exhausted`、
+  未課金＝`unknown`」。`exhausted` を見た運用者を「そんな状態は出ないはず」と誤らせるところだった。
+- **日付スナップショット（nikki-san#667・P1）**: 「（2026-07-25 時点）」の注記は運用 doc の現在形ルール違反
+  （incidents・タスク履歴以外は現在形）。日付付きの状態記述は履歴側に置き、doc には現在の契約だけを書く。
+  → 注記ブロックを丸ごと削除し、内容を「測定側の構成」節へ現在形で溶かした。
+- **同一 doc 内の言い残し（ai-ops#86・P2）**: 冒頭の注記だけ「現在の実装が」と限定に直したのに、下の
+  「測定側の構成」節に `後者は金額しか出ない` という元の断定が残っていた。**同じ主張が複数箇所にあるとき、
+  1箇所直して満足しない**（grep で全部潰す）。
+- **手順が実行不能（ai-ops#86・P2）**: 手順1（応答形の確認）は、登録済み secret を読み戻せず公開経路も
+  禁止しているため、列挙した前提だけでは cold start のエージェントが着手できなかった。作業用 PAT を
+  別途受け取ることと、非公開の確認場所を用意することを前提に明記し、無ければ停止して依頼する形にした。
+
+**なぜ実行し忘れたか**（同じ踏み方を避けるため）: PR がマージされた時点で「完了」と扱ってしまった。
+マージ通知は購読解除を伴うので**終わった感**が強いが、ルール上はマージこそが下流確認の**開始**トリガである。
+`shared/**`・`AGENTS_COMMON.md` を触った PR は、マージ通知を受けた時点で consumer の最新
+`ai-ops/sync-common` PR を見に行くところまでが1セット。数分あけて見る必要があるので、マージ時に
+`send_later` を仕込むのが確実（ルール側にもその指示がある）。
+
+今回の内訳: 指摘4件のうち3件が consumer 同期PR由来で、うち1件は**配布済みの doc に載った事実誤り**
+（`exhausted` を出す経路があるのに「`unknown` のまま」と書いた）。取りこぼしていたら全 consumer に
+誤った記述が残っていた。ルールが警告していたとおりの結果になった。
+
+## 2026-07-25 Actions月枠の使用率算出（enhanced billing 経路）を完成させる
+
+`docs/reference/ACTIONS_QUOTA_NEXT_STEPS.md` の引き継ぎ手順に沿った作業。判断根拠を残す。
+
+- **含有枠は設定値で持つしかない**（API が返さない）。既定は GitHub Free の 2,000 分（ユーザー確認済み）で、
+  repo variable `ACTIONS_QUOTA_INCLUDED_MINUTES` で上書きする。**不正値は既定へ黙ってフォールバックさせず
+  `unknown` に倒す**——typo した上書き値を既定で置き換えると「設定したつもりの枠と違う枠で測った ok」を
+  publish しうる。`Number('2OOO')`＝`NaN` で割ると使用率が `NaN` になり `pct >= threshold` が常に false ＝
+  使用率にかかわらず ok を出す fail-open で、これは `AQ_THRESHOLD` で実際に踏んだ穴と同型。
+  上限 1,000,000 分の sanity check は分と秒の取り違え等の桁違いを弾くため（含有枠は最大でも
+  Enterprise の 50,000 分程度）。
+- **引き継ぎ doc が挙げていた「private リポジトリで publish せずに実レスポンスを確認する」案は使えない**。
+  それ自体がエージェント自発の private repo dispatch であり、`quota/actions.json` が `unknown` の間は
+  `docs/actions-quota.md` が禁止している行為そのもの（枠の状態を測るために枠のガードを破る循環）。
+  実レスポンスの確認はユーザーのローカル実行で行った。
+- **API 仕様の裏取りは net-fetch の集約モードで行った**（`docs.github.com` がセッションの egress で 403）。
+  public な ai-ops 上の実行なので枠を消費せず、取得対象も公開ドキュメントで機微でない。
+- **`quantity` は「素の実行分数」と解釈した**（引き継ぎ doc が「取り違えると数倍ずれる」と警告していた分岐）。
+  根拠は実レスポンスの `pricePerUnit` が SKU 別（Linux の分単価が単独の値として出る）で、GitHub の公表単価も
+  Linux:Windows:macOS = 1:2:10 の比＝**倍率は価格側で表現されている**こと。よって含有枠の消費は
+  `quantity × OS倍率` で数える。取り違えていた場合（＝ `quantity` が倍率換算済みだった場合）この実装は
+  使用率を**過大**に見積もる＝早めに `tight` に倒れる安全側に外れる。
+- **実レスポンスは docs の例と表記が違った**: `product` は小文字 `"actions"`（docs の例は `"Actions"`）、
+  `unitType` は `"Minutes"`（docs の例は `"minutes"`）、`date` は `"2026-07-01T00:00:00Z"`（docs の例は
+  `"2023-08-01"`）。**docs の例をそのまま前提に実装していたら全件取りこぼして誤判定していた**ので、
+  比較は全部大小無視にした（未確認の仮説で実装しない、という引き継ぎ doc の要求が実際に効いた）。
+- **`Actions storage`（GigabyteHours）を分の枠と混ぜない**。含有枠が別建てなので、artifact が溢れて
+  storage に課金が乗っただけで `exhausted` にすると、自発 dispatch が無関係な理由で恒久的に止まる。
+  分の枯渇は分課金項目の `netAmount` と使用率で直接見る。
+- **分課金項目が1件も無い月は `ok`（使用0）ではなく `unknown` にした**。「本当に使用0」と
+  「`unitType` の表記が変わって全件落ちた」を区別できず、後者を `ok` と読むと*恒久的な*誤 `ok` になる。
+  月初に一時的に `unknown` が出る不便より fail-open を嫌う。同じ理由で未知 SKU の分項目も `unknown`
+  （倍率を推測しない）。
+
+## 2026-07-25 net-fetch共通allowlistにFlickr写真CDNを追加
+
+nikki-san で Flickr移行写真の `_o`/`_z` 実サンプルをnet-fetch経由で取得し、JPEG圧縮パラメータ
+（Flickrの縮小版生成クオリティ）を調査する必要が生じた。取得先の `live.staticflickr.com`・`filedn.eu`
+はどちらも不特定多数のユーザーの公開コンテンツを配信する汎用CDNで、ドメイン自体に個人性は無い
+（取得する特定のURLが個人の写真を指すだけ）ため、機微ドメイン判定の対象外とし共通ベースに追加した。
+
+判断根拠の整理: allowlistの共通/固有区分は「そのドメインが一般に機微データを扱うか」で決めるべきで、
+「今回取得したい個々のコンテンツが機微か」で決めるべきではない（後者は実行モード＝集約/分散の判断軸）。
+当初これを混同し、nikki-sanのローカルallowlistに追加しようとして手戻りになった。
+
+副産物として、net-fetch.md の「共通ベースへの追加」手順が、consumer から出す outbox 提案（非同期・
+collect cron待ち）と、`add_repo` を持つエージェントが ai-ops を直接編集する経路のどちらを使うべきか
+明示していなかったため誤って前者を選んだ。手順に優先順位を明記する修正を別途 shared-file として本PRに
+含めた。
+
+さらにユーザーから、ドメインの機微性とは別に GitHub Actions の月枠逼迫がある指摘を受けた。枠残量その
+ものを直接取得する手段は無い（billing API はPAT必須・アカウント単位・遅延あり）が、ユーザーの再指摘で
+「間接判定は可能」と気付いた: このアカウントの consumer リポジトリは枠逼迫時にdeployをCloudflare側へ
+手動退避する repo variable を運用しており（nikki-sanの`PAUSE_GH_DEPLOY`/`PAUSE_ADMIN_WORKER_DEPLOY`）、
+変数の値を直接読めなくても、対象repoのpush起点deploy workflowの直近runがconclusion=skipped続きなら
+「枠逼迫で退避中」と判定できる（`list_workflow_runs`で取得可能・追加の資格情報不要）。実際に nikki-san
+の`deploy.yml`を確認したところ直近複数runが軒並みskippedで、現在まさに逼迫中と確認できた。同一
+アカウント配下の他privateリポジトリもActions枠を共有するため、この判定は分散モードの可否判断に転用
+できる。net-fetch.md に「間接判定をまず試み、それでも確信が持てなければユーザーに確認する」形で追記した
+（判定できないリポジトリでは引き続きユーザー確認が必須）。quota-gateの自動化自体は今後の課題として残る。
+
+## 2026-07-25 net-fetch 共通 allowlist に developers.cloudflare.com を追加
+
+「枠が `tight` のとき GitHub Actions 側の deploy を自動で止められるか」を設計するのに、
+**Cloudflare 側の切替設定（Pages の Build watch paths / Workers Builds の設定）が API で
+変更できるか**の裏取りが要る。ここが可能なら両側を自動で反転でき、不可能なら
+「GitHub 側だけ止める＝両方 off（どこにもデプロイされない）」を受け入れるかの判断になる——
+設計の分岐点そのものなので、推測で決めない。
+
+`developers.cloudflare.com` は公開ドキュメントで認証不要・機微でないため共通ベース
+（集約モード＝ public な ai-ops 上での取得）に置ける。機微なら private リポジトリの
+ローカル allowlist に置く判断になるが、これは該当しない。
+
+## 2026-07-24 403 を「報告して終わり」にする穴を共通ブロック側で塞いだ
+
+Actions storage の作業中に `docs.github.com` が 403 で弾かれ、共通ブロック「外部 URL アクセスの報告」に
+従って「接続できなかった URL」として報告した — そこで止めて手元の知識で答えてしまい、net-fetch 手順に
+入らなかった（ユーザーの指摘で発覚）。
+
+構造的な原因は**アンチパターンの警告が手順の内側にあったこと**。`docs/net-fetch.md` の「よくある失敗」
+冒頭はこの失敗をそのまま書いているが、オンデマンド層の doc は「net-fetch を使おう」と決めた後にしか
+読まれない。＝**手順に入らない失敗を、手順に入った人しか読めない場所で防ごうとしていた**。
+
+加えて常時ロード層の 2 節が隣接していて、403 に対して:
+
+- 「外部 URL アクセスの報告」は具体的で即時に完了できる行動（報告する）を与える
+- 「外部ネットワーク取得が要るとき」の発火条件は抽象的（「egress 制限で届かず、取得が作業に必要になったら」）
+
+となっており、報告を済ませた時点で義務を果たした感覚になる。そこで常時ロード層の側を直した:
+報告節に「報告は取得の代わりにならない・403/407 は net-fetch の発火トリガ」を明記し、net-fetch 節の
+発火点を「403/407 で弾かれた瞬間」と具体化した。オンデマンド doc 側は既に正しいので触っていない。
+
 ## 2026-07-24 net-fetch SOP: 能力不足時は分散モードへ落とさず停止する（Codex #644/#406）
 
 consumer 同期 PR（nikki-san#644 / private#406）に付いた Codex レビュー2件が、`shared/docs/net-fetch.md`
@@ -181,245 +419,3 @@ net-fetch SOP の2件の Codex 指摘（#406=モード選択をツール能力�
 配置判断: 2軸で共通×オンデマンド。sop-format は SOP 作成/改訂時に skill で自動発火する既存の書式規約 doc で、
 RFC 2119 キーワード規律も既にあり (3) が自然に接続するため、ここに節を足すのが導線・整合の両面で最適。
 AGENTS_COMMON（常時ロード層）には足さない（全タスクのコストに乗せない）。
-
-## 2026-07-23 net-fetch: 共通 allowlist に実ドメイン追加＋「allowlist 欠落時にモードを勝手に切り替えない」ルール
-
-private リポジトリでの net-fetch テスト（`https://v2.hysteria.network/docs/Changelog/` の取得）で2つ判明:
-
-1. **共通 allowlist が効かない**: ユーザーは `v2.hysteria.network` を「共通許可リストに追加した」認識だったが、
-   ai-ops main の正本 `shared/.github/net-allowlist.txt` には入っていなかった（配布コピーやローカルを触った
-   か、未マージだった可能性）。共通リストの唯一の正本は ai-ops の `shared/.github/net-allowlist.txt` で、
-   sync で各 consumer の `.github/net-allowlist.txt` に配布されて初めて効く。正本に `v2.hysteria.network` を
-   追加（＋ai-ops 自身のバイト一致コピー）。public な docs ドメインなので共通ベース（public 経路）に置いてよい。
-
-2. **allowlist 欠落を分散モードで回避しようとした**: private の agent が「集約は outbox→同期→マージで非同期
-   だから、今答えるために分散モード（このリポジトリ自身で実行）に切り替える」と判断しかけた。これはモード
-   切り替えを allowlist 追加プロセスの回避手段に使うもので、「何を許すかはユーザーが決める」統制を崩す。
-   ユーザーが停止させた。
-
-対処（ルール）: モードは**可視性・機微性（将来は枠残量）だけ**で選ぶものと明記し、allowlist に無いドメインを
-取得しようとしたら **停止してユーザーに手動追加を依頼する**（MUST）／**勝手に分散モードへ切り替えない・自分で
-allowlist に足して続行しない**（MUST NOT）を、常時層 `AGENTS_COMMON.md` と手順 `shared/docs/net-fetch.md`
-（モード節＋手順3）の両方に入れた。依頼にはどのファイルに何を足すかを明示する。
-
-学び: net-fetch のモード選択（集約/分散）は「どこで実行し結果をどの可視性に置くか」の軸であって、allowlist の
-穴を埋める手段ではない。allowlist 追加はユーザー統制下の非同期手続きで、即時性より統制を優先する。
-
-## 2026-07-23 net-fetch: consumer 同期 PR の Codex 追加指摘（注入・PEM・クエリ）を正本で修正
-
-nikki-san#636 / private#401（net-fetch を配布した同期 PR）への Codex レビューが、ai-ops#68 には無かった
-**追加の指摘**を出していた。配布ファイルなので正本 ai-ops で直し、sync で全 consumer へ再配布する。
-
-- **スクリプト注入（nikki-san P1・重大）**: workflow の Summarize `run:` に `${{ inputs.request_id }}` を生で埋めており、
-  GitHub が bash 実行前に展開するため `request_id=$(...)` で任意コマンド実行できた（fetch が reject しても
-  `always()` の要約ステップで走る）。#70 の初回修正で `url` の生埋め込みは消したが **`request_id` を残していた**。
-  対処: 動的値をすべて `env:` 経由で渡し、`$VAR` を `printf` する（env の値は再評価されない）。URL は伏字済み
-  meta.txt から拾う。
-- **PEM ブロック未伏字（private P2）**: `-----BEGIN … PRIVATE KEY-----` パターンは BEGIN 行しか一致せず、行単位の
-  sed 伏字だと base64 本文・END が response.txt に残っていた（集約モードで公開 ci-logs に落ちる）。
-  対処: `redact_file()` を追加し、awk で BEGIN〜END を丸ごと `[REDACTED-PRIVATE-KEY]` に置換してから token 類を sed。
-- **クエリ/フラグメントで allowlist 誤判定（private P2）**: host 抽出がパスの無い `https://example.com?x=1` /
-  `#frag` で `?`/`#` を落とさず、`example.com?x=1` を allowlist と突き合わせて**許可済みでも拒否**していた。
-  対処: host 抽出で `?` と `#` も除去。
-- **collector 登録（nikki-san P2）**: 「新規 workflow はフル生ログ collector の一覧へ失敗時ゲートで登録」は
-  **リポジトリ固有**（collector `collect-deploy-run-logs.yml` と設計 doc は nikki-san ローカル・配布対象外）。
-  正本では直せないので nikki-san 側のローカル変更で対応する（別 PR）。
-
-- **userinfo 資格情報の漏洩（#70 への再レビュー P1）**: `SAFE_URL` は token パターンとクエリ値しか伏字にせず、
-  `https://user:pass@host/` の `user:pass@` を残していた。userinfo チェックで fetch は reject するが `emit` は
-  `SAFE_URL` を `meta.txt` に書く→集約モードで公開 ci-logs に資格情報が残る。対処: `redact_secrets` に
-  `s|(://)[^/?#@]*@|\1[REDACTED-USERINFO]@|` を追加（パス/クエリ中の `@` は `/?#` 境界で誤爆しない）。
-
-学び: 配布物への指摘は「同一ファイルを持つ全 consumer 分」を1回で正本修正すれば足りるが、consumer ごとに
-Codex が見る文脈（各 repo の AGENTS.md・collector 有無）が違い、**consumer PR にしか出ない指摘**もある
-（今回の注入・PEM・クエリは #68 に出ず #636/#401 で出た）。配布した net-fetch のレビューは consumer 側 PR も
-必ず確認する。workflow の `run:` に `${{ inputs.* }}` を生で埋めない（env 経由）ことは全 workflow 共通の鉄則。
-
-## 2026-07-23 net-fetch: Codex レビュー指摘（P1 secret 漏洩 / P2 パストラバーサル）を修正
-
-ai-ops#68（および同一ファイルを配布した nikki-san#636・private#401）への Codex レビュー2件を正本で修正した
-（配布ファイルなので consumer PR を手編集せず ai-ops で直す）。
-
-- **P1（secret 漏洩）**: secret を含む URL を拒否しても `emit()` が生 URL を `meta.txt` に書き、`net-fetch.yml` は
-  rejected でも `net-fetch-out` を publish するため、集約モードだと**公開 `ci-logs` に secret が残る**。
-  対処: `redact_secrets()` を追加し、出力に載せる URL は secret パターン＋secret 臭いクエリ値を伏字にした
-  `SAFE_URL` を使う（`meta.txt` の `url=`）。workflow の Summarize も生入力ではなく伏字済み `meta.txt` から
-  URL を拾う（要約は public な run ログにも出るため）。
-- **P2（パストラバーサル）**: publish の `dest` に検証前の生 `request_id` を使っていたため、`../branch-cleanup/latest`
-  や `..` で net-fetch/<id> スライス外へ publish できた（スクリプトが reject しても publish は `if: always()`）。
-  対処: スクリプトが `request_id` を検証（`^[A-Za-z0-9._-]+$` かつ `..` を含まない）し、通らない id は
-  ユーザー制御でない `net-fetch/_invalid-<ts>-<pid>` へ退避した `dest` を GITHUB_OUTPUT に出す。workflow は
-  生入力ではなく `steps.fetch.outputs.dest` を publish の dest に使う。空 dest のときは publish しないガードも追加
-  （空を publish-ci-logs に渡すと clone を丸ごと消しかねないため）。
-
-学び: net-fetch の結果は集約モードで public な `ci-logs`／run ログに出るので、**出力に載る文字列（URL・dest・
-要約）はすべて「拒否した入力でも安全か」を基準に組む**。拒否は「弾いて緑で publish」なので、拒否した生入力が
-出力経路に載らないことまで含めて設計する。
-
-## 2026-07-23 net-fetch: エージェントの代理インターネット取得リレーを共通基盤として追加
-
-Claude Code の許可ドメイン egress が機能しない環境向けに、GitHub Actions ランナー（フルのネット接続を持つ）を
-中継して**許可ドメインだけ**を取得するリレーを追加した。エージェントは egress 制限下でも GitHub には到達できる
-ため、GitHub 自体を中継所にする構図。正本は `shared/`（全 consumer へ配布）、ai-ops 自身にもバイト一致コピー
-（`branch-cleanup` と同じ dual placement）。
-
-判断の経緯（コードに残らない前提・制約）:
-
-- **集約 vs 分散**: 実行を public な ai-ops 上で回せば GitHub Actions 分が無料（既存の「ai-ops を public に
-  している理由」と同じ）。ただし結果は ai-ops の `ci-logs`＝世界公開に落ちる。そこで両モードを同一 workflow
-  で持ち、**どのリポジトリで起動するかだけがモードの違い**にした。現状の既定は集約（枠逼迫のため）。
-- **allowlist 2層（共通配布 ∪ リポジトリ固有）**: 共通ベース `.github/net-allowlist.txt`（配布）に加え、
-  各リポジトリの `.github/net-allowlist.local.txt`（配布対象外・repo 所有）を union。**機微を取得しうる
-  ドメインは private リポジトリのローカルにだけ書く**運用。集約モードの判定は共通ベースのみを見るので、
-  機微ドメインは構造的に public 経路を通れない（配置がルールを強制する。人の規律に依存しない）。
-  `.local.txt` を配布しない（shared に置かない）のは、置くと manifest 管理下になり同期で上書きされ
-  「repo 所有」でなくなるため。
-- **secret を fetch に含めさせない縛り**: 取得ジョブに secret を一切渡さない（クリーンルーム）を第一の
-  構造的縛りにし、request の URL/クエリの secret パターン拒否・response の secret 伏字を二層目に置いた。
-  publish（ci-logs へ push）に使う github.token は取得ステップの env に載せない。
-- **consumer 側に dispatch トークンを置かない**: エージェントは自前の GitHub 資格情報で workflow_dispatch
-  する。過去に上りの即時化で置いた `OPS_DISPATCH_TOKEN`（consumer→ai-ops 書き込み）を「ルール正本への
-  増幅経路」として撤去した経緯（→ ops-sync-design.md）と同じ理由で、consumer に常設トークンを増やさない。
-- **SSRF ガード**: allowlist と無関係に、https 以外・URL 内資格情報・IP リテラル・localhost・クラウド
-  メタデータ（169.254.169.254 等）・リダイレクト追従を常に禁止。allowlist はドメイン前提なので通常は
-  一致しないが、明示的に弾いて意図を固定した。
-- **枠連動（quota-gate）は今回作らない**が、あとで共通基盤として差し込めるよう継ぎ目を用意した。集約/分散の
-  両実行経路は既に存在するので、将来足すのは「枠残量でどちらを選ぶか」の判定層だけ（この workflow・SOP は
-  変更不要）。枠残量は billing API 経由（PAT 必須・アカウント単位・遅延あり）でしか取れないことも確認済み。
-
-学び: 新規 shared workflow なので docs/ci-logs.md に従い publish-ci-logs を組み込む必要があるが、net-fetch は
-「取得結果そのものを per-request スライスへ publish する」ことが inline publish を兼ねる（別途 logs/ci/scripts を
-足さず、結果 publish で要件を満たした）。
-
-## 2026-07-23 archive-task-history に統合時の重複排除（dedup）を追加
-
-- **なぜ**: PR #58（自動アーカイブ）に Codex P2「重複した履歴エントリ」。`archive-task-history.mjs` は
-  inbox フラグメントを本体（`AI_TASK_HISTORY.md`）と突き合わせずに無条件連結していたため、本体に既にある
-  エントリと同一内容のフラグメントを置くと、統合で本体に区別できない同一レコードが2つ並ぶ。実際 `2026-07-20
-  history-inbox…プレースホルダ化` の未消化フラグメントが本体の同エントリと byte 一致（trim・1402B）で残って
-  いて、次バッチで二重取り込みされる生きた状態だった。
-- **修正（恒久）**: 統合フェーズで、本体にある dated エントリの**本文全体（trim）**を set 化し、同一本文の
-  フラグメントは取り込まない。ただしフラグメントは消費（削除）して掃除する（本体に既にあり情報は失われない）。
-  inbox 内どうしの重複も同じ set で1つに畳む。全エントリが重複のファイルも consume 対象なので、次バッチが
-  自動で掃除する（自己修復）。
-- **判定を「本文全体一致」にした理由（コードに無い制約）**: 見出しだけの一致で消すと、同日別タイトルの正当な
-  エントリ（例: 2026-07-20 が本体に2件・別内容で並存）を誤って落とす。実害のある重複は byte 一致なので本文
-  全体一致だけを重複とみなす。
-- **スコープの限界**: 重複判定は**本体のみ**が対象で、アーカイブ済みエントリとの突き合わせはしない（Codex
-  指摘の本体二重化が対象。年ファイル全ロードは重いので見送り）。
-- **応急**: 上記 07-20 重複フラグメントは同 PR で削除済み（恒久修正でも次バッチで掃除されるが、それまでの
-  read 時二重を消すため即削除）。テスト基盤が無いため一時スクリプトで本体重複／非重複／inbox 内重複／
-  重複のみの4ケースを検証（コミットしない）。
-
-## 2026-07-23 branch-cleanup workflow に publish-ci-logs を後付け（Codex P2 / #63 の抜け）
-
-#63 で追加した branch-cleanup workflow が、共通必須ルール「新規 `.github/workflows/` には publish-ci-logs で
-CI ログ出力を組み込む」（`docs/ci-logs.md`）を満たしておらず、private の sync 生成 PR #397 で Codex P2 が指摘。
-初版は stdout と `$GITHUB_STEP_SUMMARY` にしか出しておらず、削除結果・失敗が ci-logs ブランチに残らなかった。
-
-対処: 正本 `shared/.github/workflows/branch-cleanup.yml`（＋ai-ops 自身のバイト一致コピー）に、docs/ci-logs.md の
-手順どおり (1) `permissions: contents: write`（既存）、(2) 本体ログを `logs/ci/scripts/branch-cleanup.log` へ tee、
-(3) 末尾に「Stage CI log snapshot」＋「Publish logs to ci-logs branch」を `if: always()` で追加。inline publish
-（常時）層のみ。フル生ログ collector への登録は**リポジトリ固有**なので shared には入れない（collector を持つ repo
-だけ、その workflows 一覧に失敗時ゲートで足す＝各 repo 側の follow-up）。
-
-学び: 新規 workflow を書くときは docs/ci-logs.md を先に読む（#63 で読み飛ばした）。shared 配布の workflow は
-全 consumer に同じ抜けが伝播するので、共通必須ルールの充足はマージ前に確認する。
-
-## 2026-07-23 stale ブランチ手動削除 workflow（branch-cleanup）を shared 配布で新設
-
-private の Cloudflare Workers Builds 接続で Production branch 一覧に main が出ない件の根因が、
-エージェント生成の stale ブランチ大量残留（private 264本・codex/claude 主体）だったため、手動トリガの
-一括削除 workflow を追加。3リポジトリ（private / nikki-san / ai-ops）に同一で入れたいので shared 配布にした。
-
-判断・ハマりどころ:
-- GitHub の "Automatically delete head branches" は**マージされた PR の head しか消さない**。close/PR無し/
-  設定前のブランチは残る（＝ON でも溜まる。ユーザーが「ON なのに同症状」と指摘。仕様どおり）。だから
-  掃除 workflow が要る。
-- **workflow ファイルの配布には token 権限の壁**: sync は `OPS_SYNC_TOKEN`（PAT）で consumer に push するが、
-  GitHub は `.github/workflows/` 配下を `workflow` 権限の無い PAT で push させない。従来の shared 配布物は
-  composite action（`.github/actions/`）止まりで workflow ファイルは初。**OPS_SYNC_TOKEN に Workflows 書き込み
-  権限の付与が必要**（無いと sync PR の push が consumer で失敗する）。Codex P1 の指摘どおり README・
-  ops-sync-design.md（Secret 表＋設計注記）・sync.yml コメントの token 権限記載を Workflows:RW 込みに更新。
-  設計 doc は元々この権限を「blast radius を広げる」と避ける論調だったが、ユーザー判断（A: shared 配布維持）で
-  付与する方針とし、対象は token が既に Contents:RW を持つ同じ repo 群に限られる点を注記に明記した。
-- ai-ops は sync の consumer ではない（consumers.txt = nikki-san, private のみ）ため、shared の正本に加えて
-  ai-ops 自身の `.github/workflows/` にも**バイト一致コピー**を置く（両方を同時に直す）。
-- 安全設計: 手動のみ（workflow_dispatch）・**既定 dry-run**・既定ブランチ/keep 一覧/オープン PR head を常に
-  除外・prefixes 一致 かつ age_days（既定7）より古いものだけ対象。年齢は git committerdate で判定
-  （squash マージだと ancestry でマージ済み判定できないため、prefix＋年齢＋オープン PR 除外で安全側に倒す）。
-- keep 既定に nikki-san 固有の hugo-bin/deploy-logs も入れて全 consumer で1ファイルを使い回せるようにした
-  （存在しない repo では無害）。
-
-## 2026-07-23 ci-logs.md の失敗ゲート要件を RFC 2119 キーワード（MUST）化
-
-- **なぜ**: #59 で `shared/docs/ci-logs.md` に足した「フル生ログ collector は失敗時のみ回収／新規 collector も
-  同ゲート必須」を、配布先 private#392（sync 自動 PR）で Codex が P2 指摘。SOP 書式正本
-  `shared/docs/sop-format.md` は「要求の強さは RFC 2119 キーワードで明示」「**キーワード無しの文は説明であって
-  要求ではない前提で読まれる**」と定めるのに、当該要件が `必ず` としか書かれておらず MUST キーワードを欠いた
-  ため、SOP に従うエージェントが「説明」と解釈して失敗ゲートを付け損ね、#59 が防ごうとしたコスト回帰を
-  再発させうる、という指摘。正当なので正本を修正。
-- **設計判断**: 該当要件を MUST 化（`collector は失敗時のみ回収する（MUST）`／`新規 collector も同ゲートを
-  付ける（MUST）`）。あわせて条件式の略記禁止を `MUST NOT: == 'failure' || 'timed_out' と略す` として
-  破ったら壊れる制約であることを明示（略記は GitHub Actions 式で常時真になりゲート無効化＝#59 レビューの P2）。
-  修正は正本 `shared/docs/ci-logs.md` の1点のみ。private の `docs/ci-logs.md` は配布物なので手で直さず、
-  sync が再配布して波及させる（private#392 のコメントにもその旨を返信）。
-- **引き継ぎ**: #59 がマージ済みのため、指定ブランチ `claude/log-collection-error-only-hn3vmo` を最新 main から
-  切り直して follow-up を積んだ（新規 PR）。
-
-## 2026-07-23 dedup 挙動を共通ルール task-history.md にも反映（#60 follow-up）
-
-- **なぜ**: #60（consolidate の dedup 追加）マージ後、Codex P2 が正本ルール `shared/docs/task-history.md` を
-  指摘。統合の説明が「全フラグメントを本体へ取り込んでから削除」のままで、dedup パス（本体に既にある同一
-  本文は取り込まず削除して掃除）と食い違い、重複のみの掃除 PR では正本手順が実挙動の逆を書いている状態だった。
-- **対応**: 「統合とアーカイブ」節の consolidate 説明に dedup 例外を1文追記（見出しだけの一致では消さない、も明記）。
-  #60 は既にマージ済みでブランチも削除されていたため、規約どおり最新 main から branch を切り直して cherry-pick
-  し、別 PR として出した（マージ済み PR には積まない）。
-- ops-sync-design.md・README は #60 で反映済み。3つ目の同期先が task-history.md（配布される正本ルール）。
-
-## 2026-07-23 ai-ops を public 化（GitHub Actions 分数の枯渇対策）
-
-ユーザー相談「Actions の月枠が切れそう。履歴アーカイブやリポジトリ間同期をやっている ai-ops を public に
-しようと思うが注意点は？」を受けて public 化した。
-
-- **なぜ public 化か**: 月内の Actions 残枠が20分未満まで枯渇し、ai-ops 自身の運用 workflow
-  （sync / archive-task-history / collect-outbox）が枠切れで止まりかけていた。consumer（nikki-san / private）は
-  既に Cloudflare Workers デプロイへ移行済みで、deploy が主犯ではない。**public repo は GitHub-hosted runner の
-  Actions が無料**（アカウント枠を消費しない）ため、ai-ops 自身の workflow を枠から外すのが目的。
-  consumer は private のままなので、そちらの Actions 分数は救われない（切り分けて認識する）。
-- **public 化前の棚卸し（実施済み・クリア）**: 全 git 履歴の diff を secret パターンで走査 → 混入なし。
-  インフラ機密（IP 帯・pfSense・sing-box 等）は private repo 本体にあり ai-ops にはミラーされていない。
-  過去に private 宛だった `tasks/` ファイルの中身も運用手順のみ。残る露出は「`65edh5ih/private` という
-  非公開 repo の存在」と運用メタ（PR 番号・workflow 名・構成メモ）のみで、これは許容と判断した。
-- **入れたガード**: ①`main` のブランチ保護（無料アカウントでは **public でのみ enforced**。private 中は
-  "Not enforced" 表示が正常で、public 化の瞬間に自動で効く）。承認必須は **0** にする（archive/collect が
-  `gh pr merge` で自分の PR を PAT 自動マージするため、1以上にすると自動化が止まる）。②Settings → Actions →
-  General の fork PR を **Require approval for all external contributors**（UI 文言が outside collaborators から
-  改称された同一設定）。
-- **なぜガードが要る/効く**: 唯一の機微は `OPS_SYNC_TOKEN`（全 consumer への Contents:RW/PR:RW を持つ合鍵）。
-  Actions secret なので**可視性変更では露出しない**。かつ ai-ops の workflow はどれも `pull_request` で
-  起動しないため fork PR からトークンを窃取する経路が構造的に無い（fork 承認制は二重の保険）。
-- **PR #63 との関係**: stale ブランチ削除 workflow の shared 配布は `OPS_SYNC_TOKEN` に Workflows:write を
-  要求する（設計が意図的に避けていた格上げ）。ただし PAT は既に Contents:RW を持つ＝既にクラウンジュエルで、
-  増分は categorical でなく incremental。public 化は PAT の漏洩確率を上げない（上記の理由）ため、docs 更新
-  （README・ops-design のトークン表）＋スコープ付与を条件に許容可、と整理した。
-- 恒久的な運用前提（ai-ops=public / consumer=private の可視性モデルと帰結）は `shared/docs/ops-sync-design.md`
-  「前提・限界」に現在形で記載した。
-
-## 2026-07-23 CI ログ「失敗時のみフル収集」を正本 ci-logs.md に昇格（今後の実装へ引き継ぎ）
-
-- **なぜ**: nikki-san #627 が `collect-deploy-run-logs.yml`（`workflow_run` のフル生ログ collector）を
-  `conclusion == 'failure' || conclusion == 'timed_out'` でゲートし「失敗時のみ回収」に変えたが、この設計原則は
-  nikki-san のリポジトリ固有 doc（`docs/ci/CI_LOGS.md` 他）にしか残っておらず、**配布正本
-  `shared/docs/ci-logs.md` は未更新**だった。そのため「今後の実装／他 consumer の新規 collector に
-  引き継がれるか」を確認したところ引き継がれない状態（正本 step4 は collector に workflow 名を登録する
-  としか書いておらず、失敗ゲートに無言）。オーナー依頼で正本へ昇格し全 consumer へ配布する形にした。
-- **設計判断**: CI ログは2層で、**混同しないよう正本に明記した**。①inline publish（`publish-ci-logs`,
-  各 workflow 末尾 `if: always()`）＝成功・失敗問わず毎回の要約ログ。#627 でも据え置き。②フル生ログ
-  collector（`workflow_run` 別 workflow）＝失敗/タイムアウト時のみ。緑 run は①で要約済みで、フル生ログの
-  真価は失敗トリアージ。監視対象1完了ごとに最低1分課金のランナーを成功 run でも起こすのは空費
-  （2026-07-18 の Actions 分逼迫インシデントの主因の一つ）。①を失敗ゲートしないのは、要約ログは
-  成功 run でも回帰調査の一次情報になり、かつ本体ジョブに相乗りで追加ランナー0分だから。
-- **展開範囲**: 正本 doc の1点更新のみ。sync が nikki-san / private の `docs/ci-logs.md` へ配布して波及する
-  （＝これが「他リポジトリへの展開」の実体）。`private` は collector を持たず inline publish のみのため
-  retrofit 対象なし。nikki-san は #627 で適用済み。現時点で個別 consumer への task 起票は不要。
