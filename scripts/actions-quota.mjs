@@ -9,6 +9,8 @@
 //   AQ_TOKEN        billing 読み取り権限のある PAT。未設定なら state=unknown で degrade（ジョブは失敗させない）
 //   AQ_ACCOUNT      対象アカウント（例: 65edh5ih）。この配下の private repo すべてが同じ月枠を共有する
 //   AQ_THRESHOLD    逼迫とみなす使用率(%)。既定 90
+//   AQ_INCLUDED_MINUTES  プランの含有枠（分）。既定 2000（GitHub Free）。billing API は含有枠を返さないため
+//                        設定値で持つ。プラン変更時は repo variable ACTIONS_QUOTA_INCLUDED_MINUTES で上書きする
 //   AQ_STALE_HOURS  消費側が「古すぎる」と判断すべき時間。既定 24（出力に埋めて自己記述にする）
 //   AQ_OUTPUT_DIR   出力先ディレクトリ（既定 actions-quota-out）
 //
@@ -38,6 +40,20 @@ const parsedThreshold = Number(rawThreshold);
 const thresholdValid = Number.isFinite(parsedThreshold) && parsedThreshold > 0 && parsedThreshold <= 100;
 // 公開する threshold_pct は必ず妥当な数にする（NaN は JSON.stringify で null になり消費側が読めない）
 const threshold = thresholdValid ? parsedThreshold : 90;
+
+// 含有枠（分）。billing API はどちらの経路でも「プランに含まれる枠」を返さないので設定値で持つ。
+// 既定は GitHub Free の 2,000 分。**しきい値と同じく壊れた値は unknown に倒す**（`Number('2OOO')` の
+// NaN で割ると使用率が NaN になり、`pct >= threshold` が常に false ＝ 使用率にかかわらず ok を出す
+// fail-open になる。この穴は AQ_THRESHOLD で実際に踏んでいる）。上限は sanity check——含有枠は最大でも
+// Enterprise の 50,000 分程度なので、桁違いの値（分と秒の取り違え等）は設定ミスとして弾く。
+const INCLUDED_MINUTES_MAX = 1_000_000;
+const rawIncluded = process.env.AQ_INCLUDED_MINUTES ?? '2000';
+const parsedIncluded = Number(rawIncluded);
+const includedValid =
+  String(rawIncluded).trim() !== '' &&
+  Number.isFinite(parsedIncluded) &&
+  parsedIncluded > 0 &&
+  parsedIncluded <= INCLUDED_MINUTES_MAX;
 
 const { writeFileSync, mkdirSync } = await import('node:fs');
 const { join } = await import('node:path');

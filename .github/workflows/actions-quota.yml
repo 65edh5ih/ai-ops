@@ -43,6 +43,9 @@ jobs:
           AQ_ACCOUNT: ${{ github.repository_owner }}
           # 閾値は repo variable で運用中に変えられる（未設定なら 90）
           AQ_THRESHOLD: ${{ vars.ACTIONS_QUOTA_THRESHOLD_PCT || '90' }}
+          # 含有枠（分）も repo variable で変えられる（未設定なら GitHub Free の 2,000）。
+          # プランを変えたらここを更新しないと使用率が実態とずれる（billing API は含有枠を返さない）。
+          AQ_INCLUDED_MINUTES: ${{ vars.ACTIONS_QUOTA_INCLUDED_MINUTES || '2000' }}
           AQ_STALE_HOURS: '24'
           AQ_OUTPUT_DIR: actions-quota-out
         # ログは docs/ci-logs.md 手順2 のとおり logs/ci/scripts/<name>.log へ残す（unknown になった理由が
