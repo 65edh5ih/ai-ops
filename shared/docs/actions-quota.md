@@ -58,11 +58,13 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
 > `unknown` のまま dispatch しない。枠切れ時の実行は run の失敗に留まらず、spending limit の設定次第で
 > **実費課金**につながる。
 
-> **既知の制限（2026-07-25 時点）**: このアカウントは enhanced billing platform 側で、そちらの API は
-> 金額ベースの明細しか返さないため **`state` が `unknown` のまま**になる（＝上記の手順により private repo
-> での自発 dispatch は常に止まる）。故障ではなく未実装。残作業は ai-ops の
-> `docs/reference/ACTIONS_QUOTA_NEXT_STEPS.md`。**`unknown` を見ても「壊れているから無視してよい」とは
-> 判断しないこと**（MUST NOT）——止まる挙動自体は意図どおり。
+> **既知の制限（2026-07-25 時点）**: このアカウントは enhanced billing platform 側で、含有枠に対する
+> 使用分数を直接返す旧 API が使えない。**現在の実装は enhanced 経路で課金の有無しか見ていない**ため、
+> 課金が発生していない間は割合を判定できず **`state` が `unknown` のまま**になる（＝上記の手順により
+> private repo での自発 dispatch は常に止まる）。**故障ではなく未実装**で、止まる挙動自体は意図どおり。
+> **`unknown` を見て「壊れているから無視してよい」と判断しないこと**（MUST NOT）。
+> 残作業の手順: [ai-ops の `docs/reference/ACTIONS_QUOTA_NEXT_STEPS.md`](https://github.com/65edh5ih/ai-ops/blob/main/docs/reference/ACTIONS_QUOTA_NEXT_STEPS.md)
+> （ai-ops ローカルの doc で consumer には配布されないため、絶対 URL で示す）。
 
 ## 測定側の構成（読むだけの人は不要）
 
