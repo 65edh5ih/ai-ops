@@ -60,26 +60,33 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 1. fine-grained PAT を発行（対象: ai-ops と全 consumer / 権限: **Contents: RW**, **Pull requests: RW**, **Workflows: RW**）。
    Workflows:RW は `shared/.github/workflows/`（例: `branch-cleanup.yml`・`net-fetch.yml`）を consumer へ配布するために必須
    （GitHub は `.github/workflows/` 配下を Workflows 権限の無い PAT で push させない。無いと sync が失敗する）。
-2. 本リポジトリの Actions Secret に **`OPS_SYNC_TOKEN`** として登録。
+2. 本リポジトリの Actions Secret（<https://github.com/65edh5ih/ai-ops/settings/secrets/actions>。
+   メニュー: Settings → Secrets and variables → Actions → Secrets）に **`OPS_SYNC_TOKEN`** として登録。
 3. ai-ops の `main` にブランチ保護を掛ける（PAT による直 push の防止）。
 4. `AGENTS_COMMON.md` を main に置く（初回 push で workflow が走り、各 consumer へ配線PRが立つ）。
 5. **Actions 月枠の信号用に2本目の PAT を発行**（権限: **Account permissions → Plan: Read-only** のみ。
-   billing API は repo スコープでは読めないためアカウント権限が要る）。本リポジトリの Actions Secret に
+   billing API は repo スコープでは読めないためアカウント権限が要る）。発行画面:
+   <https://github.com/settings/personal-access-tokens>（メニュー: Settings → Developer settings →
+   Personal access tokens → Fine-grained tokens）。本リポジトリの Actions Secret
+   （<https://github.com/65edh5ih/ai-ops/settings/secrets/actions>）に
    **`ACTIONS_QUOTA_TOKEN`** として登録する。**未登録だと `quota/actions/actions.json` が `unknown` のままになり、
    全 consumer のエージェントが private repo での自発的な workflow 実行を止める**（安全側だが何も動かせない）。
-   しきい値を既定の 90% から変えるときは repo variable `ACTIONS_QUOTA_THRESHOLD_PCT` を設定する。
+   しきい値を既定の 90% から変えるときは repo variable `ACTIONS_QUOTA_THRESHOLD_PCT` を設定する
+   （<https://github.com/65edh5ih/ai-ops/settings/variables/actions>。メニュー: Settings →
+   Secrets and variables → Actions → Variables）。
    **プランの含有枠が GitHub Free の 2,000 分でないときは repo variable `ACTIONS_QUOTA_INCLUDED_MINUTES` に
    実際の分数を設定する**（enhanced billing platform の API は含有枠を返さないため設定値で持つ。旧 API が
    使えるアカウントは API の値を使うのでこの設定は不要）。
 6. **Cloudflare 月枠の信号用に、読み取り専用の CF API トークンを発行**（<https://dash.cloudflare.com/profile/api-tokens>。
    **user-scoped で作る**——Workers Builds API は account-scoped トークンを受け付けない。権限:
    **Cloudflare Pages: Read** ＋ **Workers Builds Configuration: Read** ＋ **Workers Scripts: Read**）。
-   本リポジトリの Actions Secret に **`CLOUDFLARE_QUOTA_TOKEN`**、アカウント ID を
-   **`CLOUDFLARE_ACCOUNT_ID`** として登録する。**書き込み権限を持たせないこと**（ai-ops は public。
+   本リポジトリの Actions Secret（<https://github.com/65edh5ih/ai-ops/settings/secrets/actions>）に
+   **`CLOUDFLARE_QUOTA_TOKEN`**、アカウント ID を **`CLOUDFLARE_ACCOUNT_ID`** として登録する。**書き込み権限を持たせないこと**（ai-ops は public。
    切替に要る Edit 権限の操作は consumer 側が自分のトークンで行う）。未登録なら
    `quota/cloudflare/cloudflare.json` が `unknown` のままになる（安全側）。上限・閾値を変えるときは repo variable
    `CLOUDFLARE_PAGES_BUILDS_LIMIT`（既定 500）・`CLOUDFLARE_WORKERS_BUILD_MINUTES_LIMIT`（既定 3000）・
-   `CLOUDFLARE_QUOTA_THRESHOLD_PCT`（既定 90）・`CLOUDFLARE_QUOTA_RATE_DAYS`（既定 7）を設定する。
+   `CLOUDFLARE_QUOTA_THRESHOLD_PCT`（既定 90）・`CLOUDFLARE_QUOTA_RATE_DAYS`（既定 7）を
+   <https://github.com/65edh5ih/ai-ops/settings/variables/actions> で設定する。
 
 consumer 側のセットアップは**不要**（workflow・Secret とも置かない）。
 
