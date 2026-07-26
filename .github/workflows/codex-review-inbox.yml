@@ -8,8 +8,8 @@ name: Codex review inbox
 #
 # **ops-sync でだけ動かす**（shared/ に置かず consumer へ配布しない）。理由:
 #   - 走査は全リポジトリ横断なので1箇所でよい。
-#   - ops-sync は public なのでこの workflow 自身の実行分は無料（private の月枠を食わない）。15分ごとに
-#     回せるのはこのため。
+#   - ops-sync は public なのでこの workflow 自身の実行分は無料（private の月枠を食わない）。定期実行を
+#     回せるのはこのため（頻度は下記のとおり毎時）。
 #   - consumer 側に走査用トークンを配らずに済む（「consumer に常設トークンを増やさない」原則）。
 #
 # 出力は2種類（実行は public、成果物の可視性は置き場で分ける）:
@@ -25,9 +25,12 @@ name: Codex review inbox
 
 on:
   schedule:
-    # 15分ごと。Codex の指摘はマージの2〜3分後に付くので、実効の気づきまでは15〜30分
-    # （GitHub の schedule はベストエフォートでズレる）。public リポジトリなので実行分は無料。
-    - cron: '*/15 * * * *'
+    # **毎時**。実行分は無料（public リポジトリ）なので頻度のコストは無いが、`*/15` は GitHub 側で
+    # 間引かれて**1度も発火しなかった**（12:00/12:15/12:30 の3枠連続で run が作られず、同時間帯の
+    # sync は動いていたのでアカウント側の問題ではない）。高頻度スケジュールほど優先度を落とされるため、
+    # 確実に回る頻度に下げる。Codex の指摘はマージの2〜3分後に付くので、実効の気づきは60〜90分。
+    # 急ぐときは workflow_dispatch で即時に回せる。
+    - cron: '0 * * * *'
   workflow_dispatch:
     inputs:
       lookback_days:
@@ -61,7 +64,7 @@ jobs:
 
       # 走査対象＝スライスの書き込み先。full clone は不要（main の先端にだけ書く）。
       # **どのリポジトリも `.ops-sync/` へのパスは push トリガの paths に入っていない**ことを前提にしている
-      # （入れると15分ごとに CI が起動して Actions 枠を焼く。consumer に workflow を足すときは確認する）。
+      # （入れると毎時 CI が起動して Actions 枠を焼く。consumer に workflow を足すときは確認する）。
       - name: Clone target repos
         env:
           TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
@@ -106,7 +109,7 @@ jobs:
           set -uo pipefail
           rc=0
           # 生成物を退避しておく。**push 競合時は main を取り直して再適用する**ため
-          # （15分ごとに回るうえ、対象は sync PR が頻繁にマージされる main。clone から push までの
+          # （定期的に回るうえ、対象は sync PR が頻繁にマージされる main。clone から push までの
           # 数十秒の間に main が動いて non-fast-forward で弾かれるのは日常的に起きる。実測済み）。
           stage=/tmp/inbox-stage
           rm -rf "$stage"
