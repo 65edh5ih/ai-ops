@@ -29,6 +29,11 @@ on:
     # （GitHub の schedule はベストエフォートでズレる）。public リポジトリなので実行分は無料。
     - cron: '*/15 * * * *'
   workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: '直近スキャンで遡る日数（既定 3）。過去分を洗い直すときだけ大きい値を入れて1回流す'
+        type: string
+        required: false
 
 permissions:
   contents: write # publish-ci-logs が ops-sync の ci-logs ブランチへ push するのに必要
@@ -78,7 +83,9 @@ jobs:
           CRI_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
           CRI_CLONES: clones
           CRI_OUT_ALL: clones/${{ vars.CODEX_INBOX_REPO || '65edh5ih/private' }}/.ops-sync/codex-review-inbox-all.md
-          CRI_LOOKBACK_DAYS: ${{ vars.CODEX_INBOX_LOOKBACK_DAYS || '30' }}
+          # 手動実行の入力 > repo variable > スクリプト既定（3日）の順。窓を広げるほど GraphQL の
+          # レートを食うので、常用は狭く保ち、過去分の洗い直しだけ dispatch で大きくする。
+          CRI_LOOKBACK_DAYS: ${{ inputs.lookback_days || vars.CODEX_INBOX_LOOKBACK_DAYS || '' }}
         # 走査対象は consumer 全部＋ops-sync 自身（ops-sync 本体の PR にも指摘は付く）。
         #
         # ログは docs/ci-logs.md 手順A-2 のとおり logs/ci/scripts/<name>.log へ残す。
@@ -98,17 +105,37 @@ jobs:
         run: |
           set -uo pipefail
           rc=0
+          # 生成物を退避しておく。**push 競合時は main を取り直して再適用する**ため
+          # （15分ごとに回るうえ、対象は sync PR が頻繁にマージされる main。clone から push までの
+          # 数十秒の間に main が動いて non-fast-forward で弾かれるのは日常的に起きる。実測済み）。
+          stage=/tmp/inbox-stage
+          rm -rf "$stage"
+          while read -r repo; do
+            mkdir -p "$stage/${repo}"
+            cp -a "clones/${repo}/.ops-sync" "$stage/${repo}/" 2>/dev/null || true
+          done < /tmp/target-repos.txt
+
           while read -r repo; do
             d="clones/${repo}"
             git -C "$d" config user.name 'ops-sync[bot]'
             git -C "$d" config user.email 'ops-sync@users.noreply.github.com'
-            git -C "$d" add -A -- .ops-sync
-            # 差分ゼロなら空コミットで履歴を汚さない
-            if git -C "$d" diff --cached --quiet; then continue; fi
-            git -C "$d" commit -q -m "chore(codex-inbox): 未対応 ${OPEN} 件（マージ済み ${MERGED} 件）"
-            # **1リポジトリの push 失敗で残りを諦めない**（他の一覧まで古いまま据え置かれる）。
-            if ! git -C "$d" push origin HEAD:main; then
-              echo "::warning::codex-inbox: push failed for ${repo}"
+            pushed=0
+            for attempt in 1 2 3 4 5; do
+              git -C "$d" add -A -- .ops-sync
+              # 差分ゼロなら空コミットで履歴を汚さない（再取得の結果、既に同じ内容だった場合も含む）
+              if git -C "$d" diff --cached --quiet; then pushed=1; break; fi
+              git -C "$d" commit -q -m "chore(codex-inbox): 未対応 ${OPEN} 件（マージ済み ${MERGED} 件）"
+              if git -C "$d" push origin HEAD:main 2>/dev/null; then pushed=1; break; fi
+              echo "codex-inbox: push attempt ${attempt} failed for ${repo}; refreshing main..."
+              # 生成物は毎回作り直せるので、マージせず main を取り直して上書きし直すのが最も確実
+              git -C "$d" fetch --depth=1 origin main 2>/dev/null || true
+              git -C "$d" reset --hard FETCH_HEAD >/dev/null 2>&1 || true
+              cp -a "$stage/${repo}/.ops-sync/." "$d/.ops-sync/" 2>/dev/null || true
+              sleep "$((attempt * 3))"
+            done
+            # **1リポジトリの失敗で残りを諦めない**（他の一覧まで古いまま据え置かれる）
+            if [ "$pushed" != "1" ]; then
+              echo "::warning::codex-inbox: failed to push ${repo} after retries"
               rc=1
             fi
           done < /tmp/target-repos.txt

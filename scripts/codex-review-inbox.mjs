@@ -18,7 +18,12 @@
 //   CRI_CLONES         各リポジトリのクローンを置いたディレクトリ。スライスは
 //                      <CRI_CLONES>/<owner>/<repo>/.ops-sync/codex-review-inbox.md へ書く
 //   CRI_OUT_ALL        全体一覧の出力先パス（**private リポジトリのクローン内**）
-//   CRI_LOOKBACK_DAYS  この日数より古い更新の PR は直近スキャンで見ない。既定 30
+//   CRI_LOOKBACK_DAYS  この日数より古い更新の PR は直近スキャンで見ない。既定 3
+//                      直近スキャンの役目は**新しい指摘の発見**だけでよい（Codex は PR イベントの数分後に
+//                      投稿し、この workflow は15分ごとに回る）。一度載ったものは持ち越しが resolve まで
+//                      守るので、窓を広く取る必要はない。窓を広げるほど GraphQL のレート消費が増える
+//                      （nikki-san は30日で500 PR 超＝10ページ超）。過去分を洗い直したいときだけ
+//                      workflow_dispatch で大きい値を渡して1回流す。
 //   CRI_BOT            Codex のレビュー投稿者ログイン。既定 chatgpt-codex-connector
 //
 // 出力:
@@ -35,7 +40,7 @@
 // 内容が実質変わらないファイルは書き換えない（生成時刻だけの差分でコミットが立たないように）。
 
 const GRAPHQL = 'https://api.github.com/graphql';
-const MAX_PAGES = 10; // 直近スキャンのページ上限（1ページ50件）。cutoff に届く前の暴走を防ぐ安全弁
+const MAX_PAGES = 20; // 直近スキャンのページ上限（1ページ50件）。cutoff に届く前の暴走を防ぐ安全弁
 
 const token = process.env.CRI_TOKEN || '';
 const clonesDir = process.env.CRI_CLONES || '';
@@ -43,10 +48,10 @@ const outAll = process.env.CRI_OUT_ALL || '';
 const bot = process.env.CRI_BOT || 'chatgpt-codex-connector';
 
 // 壊れた値で走査範囲が 0 日になると「指摘ゼロ」を出してしまう（fail-open）ので、妥当でなければ既定に倒す。
-const rawLookback = process.env.CRI_LOOKBACK_DAYS ?? '30';
+const rawLookback = process.env.CRI_LOOKBACK_DAYS || '3';
 const parsedLookback = Number(rawLookback);
 const lookbackDays =
-  Number.isFinite(parsedLookback) && parsedLookback >= 1 && parsedLookback <= 365 ? parsedLookback : 30;
+  Number.isFinite(parsedLookback) && parsedLookback >= 1 && parsedLookback <= 365 ? parsedLookback : 3;
 
 // consumers.txt をそのまま渡せるようにする: `#` 以降はコメント、1行に1つの `owner/repo`。
 // **行単位で先にコメントを落とす**（空白で分割してから `#` を弾くと、`# 計算基盤` のような
@@ -93,6 +98,7 @@ const PR_FIELDS = `
 // それより古い PR の指摘が最初から一覧に入らない）。
 const QUERY = `
 query($owner:String!,$name:String!,$after:String){
+  rateLimit{ cost remaining resetAt }
   repository(owner:$owner,name:$name){
     pullRequests(first:50, after:$after, orderBy:{field:UPDATED_AT,direction:DESC}){
       pageInfo{ hasNextPage endCursor }
@@ -109,6 +115,9 @@ query($owner:String!,$name:String!,$number:Int!){
   }
 }`;
 
+// 直近の rateLimit 観測値（GraphQL は 5,000 ポイント/時。15分ごとに回すので消費を見えるようにしておく）
+let rate = null;
+
 async function graphql(query, variables) {
   const res = await fetch(GRAPHQL, {
     method: 'POST',
@@ -124,6 +133,7 @@ async function graphql(query, variables) {
   // GraphQL は HTTP 200 でも errors を返す。ここで落とさないと「指摘ゼロ」として扱ってしまう。
   if (json.errors?.length) throw new Error(json.errors.map((e) => e.type || e.message).join(','));
   if (!json.data?.repository) throw new Error('no repository in response');
+  if (json.data.rateLimit) rate = json.data.rateLimit;
   return json.data.repository;
 }
 
@@ -408,7 +418,8 @@ for (const repo of repos) {
 
 console.log(
   `summary repos=${repos.length} failures=${failures.length} open_findings=${findings.length} ` +
-    `merged_unresolved=${mergedCount} files_changed=${filesChanged}`,
+    `merged_unresolved=${mergedCount} files_changed=${filesChanged} lookback_days=${lookbackDays} ` +
+    `ratelimit_remaining=${rate?.remaining ?? '?'}`,
 );
 
 setOutput('open_findings', String(findings.length));
