@@ -143,7 +143,7 @@ consumer: エージェントが .ai-ops/outbox/<時刻>-<説明>.md を main に
   消えたものを自動で刈る（`prune-tombstones.mjs`。collect-outbox.yml に同居して、その実行が clone した
   全 consumer をそのまま判定に使う。機械的削除なので PR は自動マージ）。
 - **skill ミラーの自動生成**・**sync の cron 再適用**は保守バッチというより下りの一部（上記）。
-- **Actions 月枠の信号**（下記）
+- **Actions 月枠の信号**・**Cloudflare 月枠の信号**（下記）
 
 #### Actions 月枠の信号
 
@@ -152,7 +152,7 @@ private repo の workflow を dispatch する経路（net-fetch の分散モー�
 留まらず spending limit 設定次第で実費課金につながるため、実行前に読む信号を1つ用意する。
 
 `actions-quota.yml`（cron 6時間ごと）が `actions-quota.mjs` を実行し、billing API で測った使用率を
-`ok` / `tight` / `exhausted` / `unknown` の粗い state に落として `ci-logs` の `quota/actions.json` へ publish する。
+`ok` / `tight` / `exhausted` / `unknown` の粗い state に落として `ci-logs` の `quota/actions/actions.json` へ publish する。
 消費側の手順は `docs/actions-quota.md`（全 consumer へ配布）。
 
 - **ai-ops でだけ測る**（`shared/` に置かず consumer へ配布しない）: 枠はアカウント単位なので測定は1箇所で
@@ -167,6 +167,33 @@ private repo の workflow を dispatch する経路（net-fetch の分散モー�
   変化はすべてここに落ちる。スクリプトが結果を残せず落ちた場合に備え workflow 側にも `unknown` を書く
   保険ステップがある——無いと publish が何もせず `ci-logs` に前回の古い `ok` が残り、消費側がそれを掴む
   fail-open になる。
+
+#### Cloudflare 月枠の信号
+
+GitHub Actions の枠が尽きたときの退避先は Cloudflare だが、**CF 側にも月枠がある**（Free: Pages の
+ビルド 500回/月・Workers Builds 3,000分/月。ともにアカウント単位）。GitHub 側だけ見て自動退避すると
+今度は CF を溶かして「どこにもデプロイできない」に至るので、対になる信号を持つ。
+
+`cloudflare-quota.yml`（cron 6時間ごと）が `cloudflare-quota.mjs` を実行し、`ci-logs` の
+`quota/cloudflare/cloudflare.json` へ publish する。全体 state に加えてリソース別（`pages_builds` /
+`workers_build_minutes`）の state も出す——退避先として使えるのがどちらかで判断が変わるため。
+
+- **ai-ops でだけ測る**（`actions-quota` と同じ理由: 枠はアカウント単位・public なので GitHub 枠を
+  食わない・consumer に CF トークンを配らない）。
+- **ai-ops に置く CF トークンは読み取り専用にする**（MUST NOT: 書き込み権限を持たせる）。ai-ops は
+  public で、切替に要る Edit 権限の操作は consumer 側の workflow が自分のトークンで行う。
+  なお Workers Builds API は **user-scoped トークン必須**（account-scoped は "Invalid token" になる）。
+- **使用率だけで判定しない**: 同じ月内でも設定変更でレートが不連続に変わる（2026-07 の実測では
+  Pages の watch paths を絞る前後で 32件/日 → 2件/日）。**直近 N 日の窓**で日次レートを出し、
+  残枠が月末まで持たなければ `tight` にする。**月累計 ÷ 経過日数の平均は使わない**（変更の前後を
+  またぐと実態とずれる）。
+- **枠を消費しないものを数えない**: Pages の `ad_hoc`（`wrangler pages deploy`＝Direct Upload）と、
+  watch paths 不一致で `is_skipped` になった deployment は除く。2026-07 は deployment 2,079 件のうち
+  課金対象は 94 件だった（4.5%）——ここを取り違えると 20 倍以上ずれる。
+- **Workers Builds の分数は推定値**: 使用量を返すエンドポイントが無いため `running_on`〜`stopped_on`
+  から算出している。Cloudflare の課金定義と一致する保証は無いので、閾値には余裕を持たせる。
+- **測れなければ必ず `unknown`**（＝消費側は逼迫扱い）。ページングが進まない場合も過少カウント＝
+  fail-open になるので `unknown` に倒す。
 
 #### タスク履歴の統合とアーカイブ
 
@@ -197,6 +224,8 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 |---|---|---|---|
 | `OPS_SYNC_TOKEN` | ai-ops のみ | ai-ops＋全 consumer / Contents:RW, PR:RW, Workflows:RW | 下り同期 PR・上り取り込み/掃除 PR の作成、consumer の読み取り |
 | `ACTIONS_QUOTA_TOKEN` | ai-ops のみ | アカウント / Plan: Read-only（repo スコープ不要） | Actions 月枠の使用率を billing API で測る（→ 下記「Actions 月枠の信号」） |
+| `CLOUDFLARE_QUOTA_TOKEN` | ai-ops のみ | Cloudflare の **user-scoped・読み取り専用**（Pages: Read / Workers Builds Configuration: Read / Workers Scripts: Read） | CF 月枠を測る（→ 下記「Cloudflare 月枠の信号」）。**書き込み権限を持たせない** |
+| `CLOUDFLARE_ACCOUNT_ID` | ai-ops のみ | ─ | 同上。public repo のログに出さないため secret で持つ |
 
 > **Workflows:RW が要る理由**: `shared/.github/workflows/`（現状 `branch-cleanup.yml`・`net-fetch.yml`）を consumer へ配布するため。
 > GitHub は `.github/workflows/` 配下のファイルを Workflows 権限の無い PAT で push させないので、この権限が

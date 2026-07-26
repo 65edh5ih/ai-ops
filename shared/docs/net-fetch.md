@@ -46,7 +46,7 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
     落とすため）。分散を使うのは取得内容が機微で分散が正しいときだけ。
   - **分散モードで起動する前に、Actions 月枠の逼迫状態を確認する**（MUST）。手順と信号の読み方は
     [`docs/actions-quota.md`](actions-quota.md)（ai-ops が billing API で実測し、`ci-logs` の
-    `quota/actions.json` に粗い state を公開している）。**`ok` 以外（`tight` / `exhausted` / `unknown`）
+    `quota/actions/actions.json` に粗い state を公開している）。**`ok` 以外（`tight` / `exhausted` / `unknown`）
     なら分散モードで dispatch しない**（MUST NOT）——停止してユーザーに判断を仰ぐ。枠が尽きた状態での
     実行は run の失敗に留まらず、spending limit の設定次第で**実費課金**につながる。
   - 枠の状態を**エージェントが推測で埋めない**（MUST NOT）。信号が無い・古い場合は `unknown`＝逼迫扱い

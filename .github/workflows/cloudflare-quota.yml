@@ -1,0 +1,118 @@
+name: Cloudflare quota
+
+# Cloudflare 側の月枠（Pages のビルド回数・Workers Builds の分数）を実測し、`ci-logs` ブランチの
+# `quota/cloudflare/cloudflare.json` へ粗い state として公開する。GitHub 枠の逼迫時に「CF へ退避してよいか」を
+# 判断するための、`actions-quota` の対になる信号（手順: scripts/cloudflare-quota.mjs 冒頭）。
+#
+# **ai-ops でだけ動かす**（shared/ に置かず consumer へ配布しない）。理由は actions-quota と同じ:
+#   - CF の枠は**アカウント単位**なので測定は1箇所でよい。
+#   - ai-ops は public なので測定自体が GitHub の枠を消費しない。
+#   - consumer に CF トークンを配らずに済む。
+#
+# **ここに置くトークンは読み取り専用にする**（MUST NOT: 書き込み権限を持たせる）。ai-ops は public で、
+# 切替（Pages の自動デプロイ反転・watch paths 変更）に要る Edit 権限は consumer 側の workflow が
+# 自分のトークンで行う。secret 未設定なら state=unknown を publish して緑で終わる（消費側は unknown を
+# 逼迫と同じ扱いにするので安全側に倒れる）。
+#
+# fork PR から secret に触れさせないため、トリガは schedule と workflow_dispatch だけにする
+# （pull_request 系のトリガを足さないこと）。
+
+on:
+  schedule:
+    - cron: '41 */6 * * *' # 6時間ごと（actions-quota と分をずらす）。消費側の陳腐化許容は 24h
+  workflow_dispatch:
+
+permissions:
+  contents: write # publish-ci-logs が ci-logs ブランチへ結果を push するのに必要
+
+concurrency:
+  group: cloudflare-quota
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Measure quota
+        id: measure
+        env:
+          # secret はこのステップの env にだけ載せる（他ステップ・publish には渡さない）
+          CFQ_TOKEN: ${{ secrets.CLOUDFLARE_QUOTA_TOKEN }}
+          CFQ_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # 上限・閾値は repo variable で運用中に変えられる（未設定なら Free プランの既定）
+          CFQ_THRESHOLD: ${{ vars.CLOUDFLARE_QUOTA_THRESHOLD_PCT }}
+          CFQ_PAGES_LIMIT: ${{ vars.CLOUDFLARE_PAGES_BUILDS_LIMIT }}
+          CFQ_WORKERS_LIMIT: ${{ vars.CLOUDFLARE_WORKERS_BUILD_MINUTES_LIMIT }}
+          CFQ_RATE_DAYS: ${{ vars.CLOUDFLARE_QUOTA_RATE_DAYS }}
+          CFQ_STALE_HOURS: '24'
+          CFQ_OUTPUT_DIR: cloudflare-quota-out
+        # ログは docs/ci-logs.md 手順A-2 のとおり logs/ci/scripts/<name>.log へ残す（unknown になった理由が
+        # 権限・応答形・ページングのどれかを後から切り分けるため）。スクリプトは常に exit 0 なので
+        # tee のステータスでジョブは落ちない。
+        run: |
+          mkdir -p logs/ci/scripts
+          node scripts/cloudflare-quota.mjs 2>&1 | tee logs/ci/scripts/cloudflare-quota.log
+
+      # スクリプトが結果を残せずに落ちた場合の保険。これが無いと publish が何もせず、ci-logs に
+      # **前回の古い state が残り続ける**（消費側が古い ok を掴む fail-open）。
+      - name: Ensure a result exists (fail closed)
+        if: always()
+        run: |
+          set -uo pipefail
+          f=cloudflare-quota-out/cloudflare.json
+          if [ ! -s "$f" ]; then
+            mkdir -p cloudflare-quota-out
+            cat > "$f" << EOF
+          {
+            "state": "unknown",
+            "resources": {
+              "pages_builds": { "state": "unknown", "note": "not measured" },
+              "workers_build_minutes": { "state": "unknown", "note": "not measured" }
+            },
+            "stale_after_hours": 24,
+            "checked_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "source": "none",
+            "note": "measurement step did not produce a result"
+          }
+          EOF
+            echo "::warning::cloudflare-quota: measurement produced no result; published state=unknown"
+          fi
+
+      - name: Summarize
+        if: always()
+        env:
+          STATE: ${{ steps.measure.outputs.state }}
+        run: |
+          set -uo pipefail
+          {
+            printf '## Cloudflare quota\n\n'
+            printf -- '- state: **%s**\n' "${STATE:-unknown}"
+            printf -- '- published to: `quota/cloudflare/cloudflare.json` on the `ci-logs` branch\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # docs/ci-logs.md 手順A-3。**publish 先（ai-ops の ci-logs）は世界公開なので、万一ログに token 形が
+      # 混ざっても外に残さない**（スクリプトは token を出力しないが、保険として伏字方針を適用する）。
+      - name: Stage CI log snapshot
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p cloudflare-quota-out
+          if [ -f logs/ci/scripts/cloudflare-quota.log ]; then
+            sed -E \
+              -e 's/[A-Za-z0-9_-]{40,}/[REDACTED-SECRET]/g' \
+              logs/ci/scripts/cloudflare-quota.log > cloudflare-quota-out/cloudflare-quota.log
+          fi
+
+      # **dest は信号ごとに分ける**（MUST）。publish-ci-logs は publish 前に dest を丸ごと
+      # `rm -rf` するので、actions-quota と `quota` を共有すると互いの JSON を消し合う。
+      - name: Publish result to ci-logs branch
+        if: always()
+        uses: ./.github/actions/publish-ci-logs
+        with:
+          source-dir: cloudflare-quota-out
+          dest: quota/cloudflare
+          commit-message: "ci(cloudflare-quota): ${{ steps.measure.outputs.state || 'unknown' }}"
+          token: ${{ github.token }}

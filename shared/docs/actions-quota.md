@@ -14,7 +14,7 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
 
 ## 前提・パラメータ
 
-- **信号の場所**: `65edh5ih/ai-ops` の **`ci-logs` ブランチ**の **`quota/actions.json`**。
+- **信号の場所**: `65edh5ih/ai-ops` の **`ci-logs` ブランチ**の **`quota/actions/actions.json`**。
   public リポジトリなので認証なしで読める。
 - **中身**（自己記述。フィールドが増えても既存の意味は変えない）:
 
@@ -38,7 +38,7 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
 
 ## 手順
 
-1. **`quota/actions.json` を読む**（上記の場所）。
+1. **`quota/actions/actions.json` を読む**（上記の場所）。
    - 完了条件: JSON が取得でき、`state` と `checked_at` が読めている。
    - **ファイルが存在しない・取得に失敗した場合は `unknown` として扱う**（MUST）。存在しないことを
      「まだ枠に余裕がある」と解釈しない（MUST NOT）。
