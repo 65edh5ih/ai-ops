@@ -97,7 +97,7 @@ consumer へ伝播する（追加しかできない実装だと撤去がドリ�
 | `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ops-sync＋全 consumer を巡回し、未統合フラグメントか超過エントリがあれば統合＋アーカイブ PR を生成・マージ |
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer から対象が消えた）を刈る |
 | `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から**未 resolve の Codex レビュースレッド**を集め、全体一覧＋リポジトリごとのスライスに落とす |
-| `.github/workflows/codex-review-inbox.yml` | （信号）cron（15分ごと）＋手動で上記を実行し、全体一覧を private の `.ops-sync/codex-review-inbox-all.md`、各リポジトリの自分の分を `.ops-sync/codex-review-inbox.md` へ直接 push（内容に変化があるときだけ） |
+| `.github/workflows/codex-review-inbox.yml` | （信号）cron（毎時）＋手動で上記を実行し、全体一覧を private の `.ops-sync/codex-review-inbox-all.md`、各リポジトリの自分の分を `.ops-sync/codex-review-inbox.md` へ直接 push（内容に変化があるときだけ） |
 | `shared/.github/actions/publish-ephemeral/` | （下り・ファイル）揮発ブランチへの publish。毎回 orphan 1コミットへ書き換え＋TTL 失効＋`--force-with-lease`。恒久ログ用の `publish-ci-logs` と対（下記「揮発する出力と恒久ログを分ける」） |
 
 consumer 側に必要な配線は**無い**（workflow・Secret とも不要）。consumer を増やすときは
@@ -258,7 +258,7 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 **ルールで埋まらない層がある**: ops-sync の `AGENTS.md`「配布変更のダウンストリーム確認」は、**セッションが
 生きている間**だけ機能する。届かない層は機械で埋める——ルールと一覧は代替でなく補完の関係にある。
 
-**しくみ**: `codex-review-inbox` workflow（cron 15分ごと＋手動）が全リポジトリ（consumer＋ops-sync 自身）の
+**しくみ**: `codex-review-inbox` workflow（cron 毎時＋手動）が全リポジトリ（consumer＋ops-sync 自身）の
 直近の PR を GraphQL で走査し、**未 resolve の Codex レビュースレッド**を集めて、下記2種類の markdown
 （全体一覧＋リポジトリごとのスライス）に書き出す。
 
@@ -273,10 +273,12 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
   最も危険なクラス。
 - **取得できなかったリポジトリは「取得失敗」行として一覧に残す**。黙って短い一覧を出すと、指摘が無いのか
   読めなかったのか区別できない（fail-open）。
-- **15分ごとに回せるのは ops-sync が public だから**（GitHub-hosted runner が無料＝アカウントの Actions 枠を
-  消費しない）。private リポジトリで同じことをすると枠を食う。
+- **cron を回せるのは ops-sync が public だから**（GitHub-hosted runner が無料＝アカウントの Actions 枠を
+  消費しない）。private リポジトリで同じことをすると枠を食う。**頻度は毎時**——実行分は無料でも、
+  `*/15` のような高頻度スケジュールは GitHub 側で間引かれて発火しない（実測: 3枠連続で run が作られず、
+  同時間帯の他 workflow は動いていた）。急ぐときは `workflow_dispatch` で即時に回す。
 - **直近スキャンの窓は狭く保つ**（既定3日）。役目は*新しい指摘の発見*だけで足りる——Codex は PR イベントの
-  数分後に投稿し、この workflow は15分ごとに回る。一度載ったものは上記の持ち越しが resolve まで守る。
+  数分後に投稿し、この workflow は毎時回る。一度載ったものは上記の持ち越しが resolve まで守る。
   窓を広げるほど GraphQL のレート（5,000ポイント/時）を食うため、過去分の洗い直しが要るときだけ
   `workflow_dispatch` の `lookback_days` に大きい値を入れて1回流す。
 

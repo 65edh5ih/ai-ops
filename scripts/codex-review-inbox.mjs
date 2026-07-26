@@ -20,7 +20,7 @@
 //   CRI_OUT_ALL        全体一覧の出力先パス（**private リポジトリのクローン内**）
 //   CRI_LOOKBACK_DAYS  この日数より古い更新の PR は直近スキャンで見ない。既定 3
 //                      直近スキャンの役目は**新しい指摘の発見**だけでよい（Codex は PR イベントの数分後に
-//                      投稿し、この workflow は15分ごとに回る）。一度載ったものは持ち越しが resolve まで
+//                      投稿し、この workflow は毎時回る）。一度載ったものは持ち越しが resolve まで
 //                      守るので、窓を広く取る必要はない。窓を広げるほど GraphQL のレート消費が増える
 //                      （nikki-san は30日で500 PR 超＝10ページ超）。過去分を洗い直したいときだけ
 //                      workflow_dispatch で大きい値を渡して1回流す。
@@ -115,7 +115,7 @@ query($owner:String!,$name:String!,$number:Int!){
   }
 }`;
 
-// 直近の rateLimit 観測値（GraphQL は 5,000 ポイント/時。15分ごとに回すので消費を見えるようにしておく）
+// 直近の rateLimit 観測値（GraphQL は 5,000 ポイント/時。定期的に回すので消費を見えるようにしておく）
 let rate = null;
 
 async function graphql(query, variables) {
@@ -339,7 +339,7 @@ function footerLines(extra) {
   ];
 }
 
-// **生成時刻だけの差分では書き換えない**（15分ごとに走るので、毎回コミットすると履歴が埋まる）。
+// **生成時刻だけの差分では書き換えない**（定期的に走るので、毎回コミットすると履歴が埋まる）。
 let filesChanged = 0;
 function writeIfChanged(path, bodyLines) {
   const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
