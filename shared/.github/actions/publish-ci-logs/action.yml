@@ -120,8 +120,25 @@ runs:
           fi
           echo "publish-ci-logs: push attempt $i failed; refreshing ci-logs..."
           if git -C "$tmp" fetch origin ci-logs 2>/dev/null; then
-            git -C "$tmp" rebase origin/ci-logs 2>/dev/null \
-              || git -C "$tmp" rebase --abort 2>/dev/null || true
+            if ! git -C "$tmp" rebase origin/ci-logs 2>/dev/null; then
+              # A concurrent publisher may have changed the same slice. Aborting the rebase and
+              # retrying the old commit can never succeed, so rebuild our update on the new tip.
+              git -C "$tmp" rebase --abort 2>/dev/null || true
+              git -C "$tmp" reset --hard origin/ci-logs >/dev/null || continue
+              rm -rf "${tmp:?}/${DEST}"
+              mkdir -p "${tmp}/${DEST}"
+              cp -a "${src_abs}/." "${tmp}/${DEST}/"
+              if [ -n "${HISTORY_DIR}" ]; then
+                mkdir -p "${tmp}/${HISTORY_DIR}/${entry}"
+                cp -a "${src_abs}/." "${tmp}/${HISTORY_DIR}/${entry}/"
+              fi
+              git -C "$tmp" add -A
+              if git -C "$tmp" diff --cached --quiet; then
+                echo "publish-ci-logs: concurrent update already contains '${DEST}'."
+                exit 0
+              fi
+              git -C "$tmp" commit -q -m "$MSG" || continue
+            fi
           fi
           sleep "$((i * 3))"
         done

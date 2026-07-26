@@ -52,6 +52,9 @@ outputs:
       fails validation, so the publish destination is never taken from
       unsanitized input.
     value: ${{ steps.fetch.outputs.dest }}
+  safe-request-id:
+    description: Request ID redacted with the same policy used for published metadata.
+    value: ${{ steps.fetch.outputs.safe_request_id }}
 runs:
   using: composite
   steps:
