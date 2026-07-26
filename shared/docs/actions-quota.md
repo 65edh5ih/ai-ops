@@ -8,7 +8,8 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
 
 - **net-fetch を分散モード（private リポジトリ自身で実行）で起動する前**（→ `docs/net-fetch.md`）。
 - そのほか、エージェント自身の判断で **private リポジトリの workflow を dispatch しようとするとき**。
-- 適用外: public リポジトリ（ops-sync）での実行は枠を消費しないので、この判定は要らない。
+- 適用外: public リポジトリ（`ops-sync` / 計算基盤の `ops-runner`）での実行は枠を消費しないので、
+  この判定は要らない（net-fetch の集約モードは ops-runner 実行なので対象外）。
   ユーザーが明示的に依頼した private リポジトリの通常作業（deploy 等）も対象外——ここが縛るのは
   **エージェントが自発的に枠を消費しにいく場合**。
 
@@ -48,7 +49,7 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
 3. **判定に従う**。
    - `ok` … 目的の workflow を private リポジトリで dispatch してよい。
    - `tight` / `exhausted` / `unknown` … **private リポジトリで dispatch しない**（MUST NOT）。
-     停止して、ユーザーに状況と代替案（public な ops-sync での集約実行・手動取得・枠リセット後の再実行）を
+     停止して、ユーザーに状況と代替案（public な ops-runner での集約実行・手動取得・枠リセット後の再実行）を
      提示して判断を仰ぐ（MUST）。
    - 完了条件: dispatch したか、ユーザーに判断を仰いで停止したかのどちらかになっている。
 4. **`ok` 以外だったことを完了報告に書く**（MUST）。ユーザーが枠の状態を把握し、退避スイッチや
