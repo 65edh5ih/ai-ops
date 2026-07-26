@@ -52,6 +52,8 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer で削除済み）を自動で刈る |
 | `scripts/actions-quota.mjs` | （信号）billing API で Actions 月枠の使用率を測り、`ok`/`tight`/`exhausted`/`unknown` の粗い state に落とす |
 | `.github/workflows/actions-quota.yml` | （信号）cron（6時間ごと）で上記を実行し `ci-logs` の `quota/actions.json` へ publish。エージェントが private repo で workflow を回してよいかの判断に使う（手順: `shared/docs/actions-quota.md`） |
+| `scripts/cloudflare-quota.mjs` | （信号）CF の月枠（Pages のビルド回数・Workers Builds の分数）を測り、使用率と**直近レートによる月末予測**の両方で band を出す |
+| `.github/workflows/cloudflare-quota.yml` | （信号）cron（6時間ごと）で上記を実行し `ci-logs` の `quota/cloudflare.json` へ publish。GitHub 枠の逼迫時に「CF へ退避してよいか」の判断に使う |
 
 ## セットアップ（1回だけ）
 
@@ -69,6 +71,15 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
    **プランの含有枠が GitHub Free の 2,000 分でないときは repo variable `ACTIONS_QUOTA_INCLUDED_MINUTES` に
    実際の分数を設定する**（enhanced billing platform の API は含有枠を返さないため設定値で持つ。旧 API が
    使えるアカウントは API の値を使うのでこの設定は不要）。
+6. **Cloudflare 月枠の信号用に、読み取り専用の CF API トークンを発行**（<https://dash.cloudflare.com/profile/api-tokens>。
+   **user-scoped で作る**——Workers Builds API は account-scoped トークンを受け付けない。権限:
+   **Cloudflare Pages: Read** ＋ **Workers Builds Configuration: Read** ＋ **Workers Scripts: Read**）。
+   本リポジトリの Actions Secret に **`CLOUDFLARE_QUOTA_TOKEN`**、アカウント ID を
+   **`CLOUDFLARE_ACCOUNT_ID`** として登録する。**書き込み権限を持たせないこと**（ai-ops は public。
+   切替に要る Edit 権限の操作は consumer 側が自分のトークンで行う）。未登録なら
+   `quota/cloudflare.json` が `unknown` のままになる（安全側）。上限・閾値を変えるときは repo variable
+   `CLOUDFLARE_PAGES_BUILDS_LIMIT`（既定 500）・`CLOUDFLARE_WORKERS_BUILD_MINUTES_LIMIT`（既定 3000）・
+   `CLOUDFLARE_QUOTA_THRESHOLD_PCT`（既定 90）・`CLOUDFLARE_QUOTA_RATE_DAYS`（既定 7）を設定する。
 
 consumer 側のセットアップは**不要**（workflow・Secret とも置かない）。
 
