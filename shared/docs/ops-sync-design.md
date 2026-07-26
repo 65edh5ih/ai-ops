@@ -259,7 +259,8 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 生きている間**だけ機能する。届かない層は機械で埋める——ルールと一覧は代替でなく補完の関係にある。
 
 **しくみ**: `codex-review-inbox` workflow（cron 15分ごと＋手動）が全リポジトリ（consumer＋ops-sync 自身）の
-直近の PR を GraphQL で走査し、**未 resolve の Codex レビュースレッド**を1本の markdown 一覧に落とす。
+直近の PR を GraphQL で走査し、**未 resolve の Codex レビュースレッド**を集めて、下記2種類の markdown
+（全体一覧＋リポジトリごとのスライス）に書き出す。
 
 - **状態を持たない**。「未 resolve のスレッド」そのものがキュー。直して resolve すれば次回実行で一覧から
   消える。別途の管理表を持たないので、一覧と実態がずれない。
@@ -274,6 +275,10 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
   読めなかったのか区別できない（fail-open）。
 - **15分ごとに回せるのは ops-sync が public だから**（GitHub-hosted runner が無料＝アカウントの Actions 枠を
   消費しない）。private リポジトリで同じことをすると枠を食う。
+- **直近スキャンの窓は狭く保つ**（既定3日）。役目は*新しい指摘の発見*だけで足りる——Codex は PR イベントの
+  数分後に投稿し、この workflow は15分ごとに回る。一度載ったものは上記の持ち越しが resolve まで守る。
+  窓を広げるほど GraphQL のレート（5,000ポイント/時）を食うため、過去分の洗い直しが要るときだけ
+  `workflow_dispatch` の `lookback_days` に大きい値を入れて1回流す。
 
 **出力は2つ**（実行は public、成果物の可視性は置き場で分ける）:
 
