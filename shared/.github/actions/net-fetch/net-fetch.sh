@@ -78,12 +78,28 @@ redact_file() {
   done
 }
 
+matches_secret() {
+  # $1 の文字列がいずれかの secret パターンに一致すれば 0
+  local s="$1" p
+  for p in "${SECRET_PATTERNS[@]}"; do
+    printf '%s' "$s" | grep -Eq "$p" && return 0
+  done
+  return 1
+}
+
 SAFE_URL="$(redact_secrets "$URL")"
+# request_id も出力（meta.txt・ジョブログ・publish 先パス）に出るので、URL と同じ基準で伏字する。
+SAFE_REQUEST_ID="$(redact_secrets "$REQUEST_ID")"
 
 # request_id は結果スライスのパス素材にもなる（publish の dest = net-fetch/<id>）。.. や / を含むと
 # 意図した net-fetch/<id> スライスの外へ publish される（path traversal）。検証を通らない id は
 # ユーザー制御でない安全な固定先へ退避し、publish はこの DEST を使う（生入力を dest にしない）。
-if printf '%s' "$REQUEST_ID" | grep -Eq '^[A-Za-z0-9._-]+$' && ! printf '%s' "$REQUEST_ID" | grep -q '\.\.'; then
+# **secret 形の id を弾く**（MUST）: token 類は `^[A-Za-z0-9._-]+$` を素通りするため（例 ghp_xxx）、
+# 文字種検査だけだと request_id に貼られた secret が publish 先パス・meta.txt・ジョブログに残る。
+# public な実行先（ops-runner）では世界公開に落ちるので、URL と同じ secret 判定を通す。
+if printf '%s' "$REQUEST_ID" | grep -Eq '^[A-Za-z0-9._-]+$' \
+   && ! printf '%s' "$REQUEST_ID" | grep -q '\.\.' \
+   && ! matches_secret "$REQUEST_ID"; then
   id_safe="$REQUEST_ID"
 else
   id_safe="_invalid-$(date -u +%Y%m%d-%H%M%S)-$$"
@@ -95,7 +111,7 @@ emit() {
   printf '%s\n' "$status" > "$OUTPUT_DIR/status.txt"
   [ -n "$reason" ] && printf '%s\n' "$reason" >> "$OUTPUT_DIR/status.txt"
   {
-    echo "request_id=$REQUEST_ID"
+    echo "request_id=$SAFE_REQUEST_ID"
     echo "url=$SAFE_URL"
     echo "method=$METHOD"
     echo "status=$status"
@@ -111,7 +127,7 @@ emit() {
       echo "dest=$DEST"
     } >> "$GITHUB_OUTPUT"
   fi
-  echo "net-fetch: status=$status http=$http_status reason=${reason:-none} id=$REQUEST_ID"
+  echo "net-fetch: status=$status http=$http_status reason=${reason:-none} id=$SAFE_REQUEST_ID"
   # rejected は「正常に弾いた」= job を失敗させない（結果を publish して読ませる）。error は非0で返す。
   case "$status" in
     ok|rejected) exit 0 ;;
@@ -122,19 +138,12 @@ emit() {
 reject() { status="rejected"; reason="$1"; emit; }
 fail()   { status="error";    reason="$1"; emit; }
 
-matches_secret() {
-  # $1 の文字列がいずれかの secret パターンに一致すれば 0
-  local s="$1" p
-  for p in "${SECRET_PATTERNS[@]}"; do
-    printf '%s' "$s" | grep -Eq "$p" && return 0
-  done
-  return 1
-}
-
 # ── 入力検証 ───────────────────────────────────────────────
 [ -n "$URL" ] || fail "empty url"
-{ printf '%s' "$REQUEST_ID" | grep -Eq '^[A-Za-z0-9._-]+$' && ! printf '%s' "$REQUEST_ID" | grep -q '\.\.'; } \
-  || fail "invalid request_id (allowed: A-Za-z0-9._- and must not contain '..')"
+{ printf '%s' "$REQUEST_ID" | grep -Eq '^[A-Za-z0-9._-]+$' \
+  && ! printf '%s' "$REQUEST_ID" | grep -q '\.\.' \
+  && ! matches_secret "$REQUEST_ID"; } \
+  || fail "invalid request_id (allowed: A-Za-z0-9._- , must not contain '..' , must not look like a secret)"
 case "$METHOD" in GET|HEAD) : ;; *) reject "method not allowed (GET/HEAD only): $METHOD" ;; esac
 
 # scheme は https のみ
