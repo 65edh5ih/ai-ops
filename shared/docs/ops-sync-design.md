@@ -36,6 +36,7 @@
 | consumer の `.ops-sync/outbox/*.md` | その consumer のエージェント |
 | 各リポジトリの `docs/history-inbox/<...>.md`（履歴フラグメント） | 新規1ファイル＝そのリポジトリのエージェント（既存ファイルには触れない） |
 | 各リポジトリの `docs/AI_TASK_HISTORY.md` | inbox の統合・アーカイブ移動とも ops-sync の archive CI（下記・保守バッチ）。エージェントは直接編集しない |
+| 一覧ホストの `.ops-sync/codex-review-inbox.md` | ops-sync の codex-review-inbox CI（下記「Codex レビューの取りこぼし対策」）。人もエージェントも編集しない |
 
 ## 配布物の三層＋タスク
 
@@ -95,6 +96,8 @@ consumer へ伝播する（追加しかできない実装だと撤去がドリ�
 | `scripts/archive-task-history.mjs` | （保守）`docs/history-inbox/` のフラグメントを `docs/AI_TASK_HISTORY.md` へ統合し、保持量超過分を `docs/history-archive/` へ移す |
 | `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ops-sync＋全 consumer を巡回し、未統合フラグメントか超過エントリがあれば統合＋アーカイブ PR を生成・マージ |
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer から対象が消えた）を刈る |
+| `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から**未 resolve の Codex レビュースレッド**を集め、1本の markdown 一覧に落とす |
+| `.github/workflows/codex-review-inbox.yml` | （信号）cron（15分ごと）＋手動で上記を実行し、一覧を**private リポジトリ**の `.ops-sync/codex-review-inbox.md` へ直接 push（内容に変化があるときだけ） |
 | `shared/.github/actions/publish-ephemeral/` | （下り・ファイル）揮発ブランチへの publish。毎回 orphan 1コミットへ書き換え＋TTL 失効＋`--force-with-lease`。恒久ログ用の `publish-ci-logs` と対（下記「揮発する出力と恒久ログを分ける」） |
 
 consumer 側に必要な配線は**無い**（workflow・Secret とも不要）。consumer を増やすときは
@@ -244,6 +247,39 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 > 設計だった（consumer が1つ侵害されると全リポジトリへルールを注入できる増幅経路）。ルール訂正に
 > 即時性は不要なので cron ポーリングに変更し、consumer 側のトークン・workflow を全廃した。
 > ops-sync の main にはブランチ保護を掛けておくこと（PAT による直 push の防止）。
+
+## Codex レビューの取りこぼし対策（未対応在庫の一覧化）
+
+**問題**: Codex は**同期 PR がマージされた数分後**にレビューを付けることがある（実測: 07:39 マージ →
+07:41 レビュー）。そのとき配布変更を出したセッションはもう終わっているので、誰も指摘を読まない。
+ops-sync 本体の PR には出ず**consumer 同期 PR にだけ出る指摘**もあるため、気づくには全 consumer を
+見に行く必要がある。結果、メール通知を1件ずつ辿って対応済みかを人が確認する運用になり、
+取りこぼしが常態化していた。配布物（`shared/`）への指摘を取りこぼすと、欠陥が全 consumer に残る。
+
+**なぜルールで解けないか**: ops-sync の `AGENTS.md` には「配布変更の PR を出したら購読し、マージ後に
+consumer 同期 PR を確認する」というルールが既にある。これは**セッションが生きている間**は機能するが、
+指摘はセッション終了後に届く。上り提案由来の取り込み PR ではそもそも提案元セッションが存在しない。
+届かない層があるので、そこは機械で埋める。
+
+**しくみ**: `codex-review-inbox` workflow（cron 15分ごと＋手動）が全リポジトリ（consumer＋ops-sync 自身）の
+直近の PR を GraphQL で走査し、**未 resolve の Codex レビュースレッド**を1本の markdown 一覧に落とす。
+
+- **状態を持たない**。「未 resolve のスレッド」そのものがキュー。直して resolve すれば次回実行で一覧から
+  消える。別途の管理表を持たないので、一覧と実態がずれない。
+- **マージ済み PR の未 resolve を最上位に出す**（🔴）。配布済み＝全 consumer に欠陥が残っている状態で、
+  最も危険なクラス。
+- **取得できなかったリポジトリは「取得失敗」行として一覧に残す**。黙って短い一覧を出すと、指摘が無いのか
+  読めなかったのか区別できない（fail-open）。
+- **15分ごとに回せるのは ops-sync が public だから**（GitHub-hosted runner が無料＝アカウントの Actions 枠を
+  消費しない）。private リポジトリで同じことをすると枠を食う。
+
+**一覧の置き場は private リポジトリ**（`.ops-sync/codex-review-inbox.md`）。理由は2つ:
+
+- ops-sync は世界公開なので、private リポジトリのレビュー内容をここに置けない（実行は public・成果物は
+  private に分ける）。この workflow が ops-sync の `ci-logs`（公開）に出すログは**件数と repo 名だけ**にする。
+- **issue ではなくファイル**にするのは、どのエージェントでも能力ゼロで読めるようにするため。issue を読むには
+  GitHub API アクセスが要り、エージェントのランタイム依存になる（`.ops-sync/tasks/` と同じ「物理的に届ける」
+  作法。→「解決したい問題」）。
 
 ## 実行基盤の分離（ops-sync と ops-runner）
 

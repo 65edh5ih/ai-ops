@@ -1,0 +1,137 @@
+name: Codex review inbox
+
+# Codex レビューの「未 resolve な指摘」を全リポジトリから集めて1つの一覧に落とす。
+#
+# なぜ必要か: Codex は**同期 PR がマージされた数分後**にレビューすることがあり、そのとき指摘を受ける
+# べきセッションはもう終わっている。結果、メール通知を1件ずつ辿って対応済みかを人が確認する運用になり、
+# 取りこぼしが常態化していた。配布物（shared/）への指摘を取りこぼすと欠陥が全 consumer に残る。
+#
+# **ops-sync でだけ動かす**（shared/ に置かず consumer へ配布しない）。理由:
+#   - 一覧は全リポジトリ横断の1本なので、走査は1箇所でよい。
+#   - ops-sync は public なのでこの workflow 自身の実行分は無料（private の月枠を食わない）。15分ごとに
+#     回せるのはこのため。
+#   - consumer 側に走査用トークンを配らずに済む（「consumer に常設トークンを増やさない」原則）。
+#
+# **一覧の置き場は private リポジトリ**（この workflow の実行は public、成果物は private）。ops-sync は
+# 世界公開なので、private リポジトリのレビュー内容をここに置けない（MUST NOT）。issue ではなくファイルに
+# するのは、**どのエージェントでも能力ゼロで読める**ようにするため（issue は GitHub API アクセスが要る＝
+# ランタイム依存になる。`.ops-sync/tasks/` と同じ「物理的に届ける」作法）。
+#
+# fork PR から secret に触れさせないため、トリガは schedule と workflow_dispatch だけにする
+# （pull_request 系のトリガを足さないこと）。
+
+on:
+  schedule:
+    # 15分ごと。Codex の指摘はマージの2〜3分後に付くので、実効の気づきまでは15〜30分
+    # （GitHub の schedule はベストエフォートでズレる）。public リポジトリなので実行分は無料。
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write # publish-ci-logs が ops-sync の ci-logs ブランチへ push するのに必要
+
+concurrency:
+  group: codex-review-inbox
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    env:
+      # 一覧の置き場（private リポジトリ）。repo variable で移せるようにしておく。
+      INBOX_REPO: ${{ vars.CODEX_INBOX_REPO || '65edh5ih/private' }}
+      INBOX_PATH: .ops-sync/codex-review-inbox.md
+    steps:
+      - name: Checkout ops-sync
+        uses: actions/checkout@v5
+        with:
+          path: ops-sync
+
+      # 一覧を書き込む先。full clone は不要（main の先端にだけ書く）。
+      - name: Clone inbox host repo
+        env:
+          TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${INBOX_REPO}.git" inbox-host
+
+      - id: collect
+        name: Collect unresolved Codex findings
+        env:
+          CRI_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
+          CRI_OUTPUT: inbox-host/${{ env.INBOX_PATH }}
+          CRI_LOOKBACK_DAYS: ${{ vars.CODEX_INBOX_LOOKBACK_DAYS || '30' }}
+          # 動的値を run: に ${{ }} で直接埋めない（GitHub が bash 実行前に展開する＝注入経路。
+          # 全 workflow 共通の鉄則）。env 経由で渡す。
+          REPO_SELF: ${{ github.repository }}
+        # 走査対象は consumer 全部＋ops-sync 自身（ops-sync 本体の PR にも指摘は付く）。
+        # スクリプトが `#` コメント行を落とすので consumers.txt をそのまま渡してよい。
+        #
+        # ログは docs/ci-logs.md 手順A-2 のとおり logs/ci/scripts/<name>.log へ残す。
+        # **このログは ops-sync の ci-logs＝世界公開に載る**ので、スクリプトは件数と repo 名しか出さない
+        # （指摘本文・パスを出さない。private の内容が公開に落ちるため）。
+        run: |
+          set -uo pipefail
+          mkdir -p logs/ci/scripts
+          CRI_REPOS="$(cat ops-sync/consumers.txt; printf '\n%s\n' "$REPO_SELF")" \
+            node ops-sync/scripts/codex-review-inbox.mjs 2>&1 | tee logs/ci/scripts/codex-review-inbox.log
+
+      - name: Commit inventory if changed
+        if: steps.collect.outputs.changed == 'true'
+        working-directory: inbox-host
+        env:
+          OPEN: ${{ steps.collect.outputs.open_findings }}
+          MERGED: ${{ steps.collect.outputs.merged_unresolved }}
+        run: |
+          set -euo pipefail
+          git config user.name 'ops-sync[bot]'
+          git config user.email 'ops-sync@users.noreply.github.com'
+          git add -- "$INBOX_PATH"
+          # add したが差分ゼロ（改行だけ等）のときに空コミットで履歴を汚さない
+          if git diff --cached --quiet; then
+            echo 'no staged change; skip commit'
+            exit 0
+          fi
+          git commit -m "chore(codex-inbox): 未対応 ${OPEN} 件（マージ済み ${MERGED} 件）"
+          git push origin HEAD:main
+
+      - name: Summarize
+        if: always()
+        env:
+          OPEN: ${{ steps.collect.outputs.open_findings }}
+          MERGED: ${{ steps.collect.outputs.merged_unresolved }}
+          FAILURES: ${{ steps.collect.outputs.failures }}
+          CHANGED: ${{ steps.collect.outputs.changed }}
+        run: |
+          set -uo pipefail
+          {
+            printf '## Codex review inbox\n\n'
+            printf -- '- open findings: **%s**（うちマージ済み PR: %s）\n' "${OPEN:-?}" "${MERGED:-?}"
+            printf -- '- unreadable repos: %s\n' "${FAILURES:-?}"
+            printf -- '- inventory changed: %s\n' "${CHANGED:-?}"
+            printf -- '- inventory: `%s` in `%s`\n' "$INBOX_PATH" "$INBOX_REPO"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # docs/ci-logs.md 手順A-3（成功・失敗を問わず常時）。
+      # publish 先は ops-sync の ci-logs＝世界公開なので、万一のトークン混入に備えて伏字をかける。
+      - name: Stage CI log snapshot
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p codex-review-inbox-out
+          if [ -f logs/ci/scripts/codex-review-inbox.log ]; then
+            sed -E \
+              -e 's/gh[pousr]_[A-Za-z0-9]{20,}/[REDACTED-SECRET]/g' \
+              -e 's/github_pat_[A-Za-z0-9_]{20,}/[REDACTED-SECRET]/g' \
+              logs/ci/scripts/codex-review-inbox.log > codex-review-inbox-out/codex-review-inbox.log
+          fi
+
+      # dest は信号ごとに分ける（publish-ci-logs は publish 前に dest を rm -rf するため）。
+      - name: Publish logs to ci-logs branch
+        if: always()
+        uses: ./ops-sync/.github/actions/publish-ci-logs
+        with:
+          source-dir: codex-review-inbox-out
+          dest: codex-review-inbox
+          commit-message: "ci(codex-review-inbox): open=${{ steps.collect.outputs.open_findings || '?' }}"
+          token: ${{ github.token }}
