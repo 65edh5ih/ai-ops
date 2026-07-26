@@ -338,6 +338,11 @@ CI が生む出力には性質の違う2種類があり、**同じブランチ�
 - **読んだら用済みの一次データ**（net-fetch の取得結果）→ 専用の揮発ブランチ（`net-fetch-results`）／
   `publish-ephemeral`。毎回 orphan 1コミットへ書き換えるので**履歴に堆積せず**、TTL（既定3日）で失効する。
 
+`publish-ephemeral` の retention は、`slice-root`（既定 `net-fetch`）直下をスライス境界として扱う。
+各スライスには action が `.published-at` を書き、期限切れに加えて、marker が無い・読めないスライスも
+年齢を安全に証明できないため削除する（fail closed）。scheduled sweep は最後のスライスが消えた場合も
+空 tree の orphan commit を publish し、揮発ブランチ上に期限切れデータを残さない。
+
 分けた理由は、**git ブランチでは削除が削除にならない**こと。`ci-logs` からファイルを消しても内容は履歴に
 残り、ops-sync は public なので取得結果が世界公開の恒久記録として積み上がる。かといって `ci-logs` ごと
 orphan 再構築すると quota 信号や archive ログの経緯まで巻き込む。**性質で置き場を分けるのが唯一の解**で、

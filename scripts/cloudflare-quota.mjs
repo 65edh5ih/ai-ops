@@ -147,23 +147,52 @@ function classify(used, limit, recentAmount) {
 // 枠を消費しないものを除く: `ad_hoc`（wrangler pages deploy＝Direct Upload）と、
 // watch paths に当たらず skip されたもの。2026-07 の実測では deployment 2,079 件中 94 件だけが対象だった。
 async function measurePages() {
-  const projects = await api(`/accounts/${accountId}/pages/projects`);
-  if (projects.status !== 200 || !projects.body?.success) {
-    return { state: 'unknown', note: `pages projects list failed (status ${projects.status})` };
+  const names = [];
+  let projectPage = 1;
+  let lastFirstProject = null;
+  let projectsComplete = false;
+  while (projectPage <= 200) {
+    const projects = await api(`/accounts/${accountId}/pages/projects?page=${projectPage}&per_page=100`);
+    if (projects.status !== 200 || !projects.body?.success) {
+      return { state: 'unknown', note: `pages projects list failed (status ${projects.status})` };
+    }
+    const items = projects.body.result || [];
+    if (!items.length) {
+      projectsComplete = true;
+      break;
+    }
+    const firstProject = items[0]?.name ?? null;
+    if (firstProject !== null && firstProject === lastFirstProject) {
+      return { state: 'unknown', note: 'pages projects pagination did not advance' };
+    }
+    lastFirstProject = firstProject;
+    names.push(...items.map((p) => p?.name).filter(Boolean));
+    const totalPages = Number(projects.body?.result_info?.total_pages);
+    if ((Number.isFinite(totalPages) && projectPage >= totalPages) || items.length < 100) {
+      projectsComplete = true;
+      break;
+    }
+    projectPage += 1;
   }
-  const names = (projects.body.result || []).map((p) => p?.name).filter(Boolean);
+  if (!projectsComplete) {
+    return { state: 'unknown', note: 'pages projects pagination reached its safety cap' };
+  }
   let used = 0;
   let recent = 0;
   for (const name of names) {
     let page = 1;
     let lastFirstId = null;
+    let deploymentsComplete = false;
     while (page <= 200) {
       const res = await api(`/accounts/${accountId}/pages/projects/${encodeURIComponent(name)}/deployments?page=${page}&per_page=25`);
       if (res.status !== 200 || !res.body?.success) {
         return { state: 'unknown', note: `pages deployments failed for a project (status ${res.status})` };
       }
       const items = res.body.result || [];
-      if (!items.length) break;
+      if (!items.length) {
+        deploymentsComplete = true;
+        break;
+      }
       // ページングが効いていない（同じページが返り続ける）と黙って過少カウント＝fail-open になるので落とす
       const firstId = items[0]?.id ?? items[0]?.created_on ?? null;
       if (firstId !== null && firstId === lastFirstId) {
@@ -179,8 +208,14 @@ async function measurePages() {
         if (t !== null && t >= rateWindowStart.getTime()) recent += 1;
       }
       const oldest = items[items.length - 1]?.created_on;
-      if (!inThisMonth(oldest)) break; // 当月より古い領域に入った
+      if (!inThisMonth(oldest)) {
+        deploymentsComplete = true;
+        break; // 当月より古い領域に入った
+      }
       page += 1;
+    }
+    if (!deploymentsComplete) {
+      return { state: 'unknown', note: 'pages deployments pagination reached its safety cap' };
     }
   }
   return classify(used, pagesLimit.value, recent);
