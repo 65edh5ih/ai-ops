@@ -18,6 +18,8 @@
 //   CRI_CLONES         各リポジトリのクローンを置いたディレクトリ。スライスは
 //                      <CRI_CLONES>/<owner>/<repo>/.ops-sync/codex-review-inbox.md へ書く
 //   CRI_OUT_ALL        全体一覧の出力先パス（**private リポジトリのクローン内**）
+//   CRI_SLICE_REPOS    リポジトリ別スライスを書き出す対象。未指定なら CRI_REPOS 全件。
+//                      public repo の main を PR 必須で保護するときは除外し、全体一覧だけに載せる。
 //   CRI_LOOKBACK_DAYS  この日数より古い更新の PR は直近スキャンで見ない。既定 3
 //                      直近スキャンの役目は**新しい指摘の発見**だけでよい（Codex は PR イベントの数分後に
 //                      投稿し、この workflow は毎時回る）。一度載ったものは持ち越しが resolve まで
@@ -29,9 +31,9 @@
 // 出力:
 //   - <CRI_OUT_ALL> … 全リポジトリ分。**リポジトリごとにグループ化**し、各グループにセッションへ貼る
 //     コピペ用の依頼文を添える。全リポジトリの内容が混ざるので private リポジトリにだけ置く。
-//   - 各リポジトリの `.ops-sync/codex-review-inbox.md` … **そのリポジトリの分だけ**。どのエージェントでも
-//     自分の作業リポジトリで自分の積み残しを読める（issue と違い API アクセスが要らない）。
-//     public リポジトリ（ops-runner）にはそのリポジトリ自身の公開 PR の指摘しか入らない。
+//   - CRI_SLICE_REPOS の `.ops-sync/codex-review-inbox.md` … **そのリポジトリの分だけ**。
+//     private consumer のエージェントが API アクセス無しで自分の積み残しを読める。public repo は
+//     PR 必須の main へ直接 push せず、private の全体一覧だけに載せる。
 //   - stdout のサマリ。**ops-sync の ci-logs（世界公開）に載るので、件数と repo 名しか出さない**
 //     （MUST NOT: 指摘本文・パスをログに出す。private リポジトリの内容が公開に落ちる）。
 //
@@ -63,6 +65,14 @@ const repos = (process.env.CRI_REPOS || '')
   .flatMap((line) => line.split(/[\s,]+/))
   .map((s) => s.trim())
   .filter((s) => REPO_SHAPE.test(s));
+const repoSet = new Set(repos);
+const sliceRepos = (process.env.CRI_SLICE_REPOS === undefined ? process.env.CRI_REPOS || '' : process.env.CRI_SLICE_REPOS)
+  .split(/\r?\n/)
+  .map((line) => line.replace(/#.*$/, '').trim())
+  .flatMap((line) => line.split(/[\s,]+/))
+  .map((s) => s.trim())
+  .filter((s) => REPO_SHAPE.test(s) && repoSet.has(s));
+const sliceRepoSet = new Set(sliceRepos);
 
 const { writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync } = await import('node:fs');
 const { dirname, join } = await import('node:path');
@@ -379,8 +389,11 @@ if (findings.length === 0) {
     all.push('```');
     all.push(`${short} の Codex 指摘の積み残しを消化する`);
     all.push(
-      '`.ops-sync/codex-review-inbox.md` にこのリポジトリ分の未対応一覧があります。' +
-        '読んで対応し、直したらレビュースレッドを resolve してください。',
+      sliceRepoSet.has(repo)
+        ? '`.ops-sync/codex-review-inbox.md` にこのリポジトリ分の未対応一覧があります。' +
+            '読んで対応し、直したらレビュースレッドを resolve してください。'
+        : 'public repo は main を PR 必須で保護しているためリポジトリ内スライスを置きません。' +
+            'この全体一覧の当該セクションを確認して対応し、直したらレビュースレッドを resolve してください。',
     );
     all.push('```');
     all.push('');
@@ -389,15 +402,16 @@ if (findings.length === 0) {
 }
 all.push(
   ...footerLines([
-    '各リポジトリには**そのリポジトリの分だけ**を抜き出した `.ops-sync/codex-review-inbox.md` も置いてある',
-    '（どのエージェントでも自分の作業リポジトリで自分の積み残しを読める）。この全体一覧はここにしか無い。',
+    'private の対象リポジトリには**そのリポジトリの分だけ**を抜き出した ' +
+      '`.ops-sync/codex-review-inbox.md` も置いてある。public repo は main を PR 必須で保護するため、',
+    '直接 push するスライスを置かず、この全体一覧だけに載せる。この全体一覧はここにしか無い。',
     '',
   ]),
 );
 writeIfChanged(outAll, all);
 
-// ── リポジトリごとのスライス（各リポジトリの .ops-sync/ に置く）────────────────────────────
-for (const repo of repos) {
+// ── リポジトリごとのスライス（指定された private consumer の .ops-sync/ に置く）─────────────
+for (const repo of sliceRepos) {
   const mine = findings.filter((f) => f.repo === repo);
   // そのリポジトリ自身の取得失敗だけを載せる（他リポジトリの事情を持ち込まない）
   const myFailures = failures.filter((f) => f.repo === repo || f.repo.startsWith(`${repo}#`));
@@ -417,7 +431,7 @@ for (const repo of repos) {
 }
 
 console.log(
-  `summary repos=${repos.length} failures=${failures.length} open_findings=${findings.length} ` +
+  `summary repos=${repos.length} slice_repos=${sliceRepos.length} failures=${failures.length} open_findings=${findings.length} ` +
     `merged_unresolved=${mergedCount} files_changed=${filesChanged} lookback_days=${lookbackDays} ` +
     `ratelimit_remaining=${rate?.remaining ?? '?'}`,
 );

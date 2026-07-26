@@ -97,7 +97,7 @@ consumer へ伝播する（追加しかできない実装だと撤去がドリ�
 | `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ops-sync＋全 consumer を巡回し、未統合フラグメントか超過エントリがあれば統合＋アーカイブ PR を生成・マージ |
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer から対象が消えた）を刈る |
 | `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から**未 resolve の Codex レビュースレッド**を集め、全体一覧＋リポジトリごとのスライスに落とす |
-| `.github/workflows/codex-review-inbox.yml` | （信号）cron（毎時）＋手動で上記を実行し、全体一覧を private の `.ops-sync/codex-review-inbox-all.md`、各リポジトリの自分の分を `.ops-sync/codex-review-inbox.md` へ直接 push（内容に変化があるときだけ） |
+| `.github/workflows/codex-review-inbox.yml` | （信号）cron（毎時）＋手動で上記を実行し、全体一覧を private の `.ops-sync/codex-review-inbox-all.md`、private consumer の自分の分を `.ops-sync/codex-review-inbox.md` へ直接 push（内容に変化があるときだけ）。public repo は全体一覧だけ |
 | `shared/.github/actions/publish-ephemeral/` | （下り・ファイル）揮発ブランチへの publish。毎回 orphan 1コミットへ書き換え＋TTL 失効＋`--force-with-lease`。恒久ログ用の `publish-ci-logs` と対（下記「揮発する出力と恒久ログを分ける」） |
 
 consumer 側に必要な配線は**無い**（workflow・Secret とも不要）。consumer を増やすときは
@@ -260,7 +260,7 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 
 **しくみ**: `codex-review-inbox` workflow（cron 毎時＋手動）が全リポジトリ（consumer＋ops-sync 自身）の
 直近の PR を GraphQL で走査し、**未 resolve の Codex レビュースレッド**を集めて、下記2種類の markdown
-（全体一覧＋リポジトリごとのスライス）に書き出す。
+（全体一覧＋private consumer ごとのスライス）に書き出す。
 
 - **状態を持たない**。「未 resolve のスレッド」そのものがキュー。直して resolve すれば次回実行で一覧から
   消える。別途の管理表を持たないので、一覧と実態がずれない。
@@ -287,15 +287,17 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 - **全体一覧** `.ops-sync/codex-review-inbox-all.md` … **private リポジトリにだけ**置く。全リポジトリ分を
   **リポジトリごとにグループ化**し、各グループにそのリポジトリのセッションへ貼るコピペ用の依頼文を添える
   （人のトリアージ用。1本開けば全体が分かり、あとは貼るだけで各リポジトリに振れる）。
-- **リポジトリごとのスライス** `.ops-sync/codex-review-inbox.md` … **各リポジトリに自分の分だけ**。
+- **リポジトリごとのスライス** `.ops-sync/codex-review-inbox.md` … **private consumer に自分の分だけ**。
   全リポジトリで同じパスなので、共通ブロックの発火トリガを「このリポジトリの `.ops-sync/codex-review-inbox.md`
-  を読め」の1文に固定できる（どのセッションでも自分の積み残しを自力で読める）。
+  を読め」の1文に固定できる（private consumer のセッションでは自分の積み残しを自力で読める）。public の
+  `ops-sync` / `ops-runner` は走査対象には残すが、スライスを書かず private の全体一覧だけに載せる。
 
 置き場をこう分ける理由は2つ:
 
 - ops-sync は世界公開なので、**全リポジトリ分が混ざる全体一覧をここに置けない**。この workflow が ops-sync の
-  `ci-logs`（公開）に出すログも**件数と repo 名だけ**にする。スライスは各リポジトリ自身の指摘しか含まないので、
-  public な ops-runner・ops-sync に置いても公開範囲は変わらない。
+  `ci-logs`（公開）に出すログも**件数と repo 名だけ**にする。さらに public な `ops-sync` / `ops-runner` は
+  `main` を PR 必須の ruleset で保護するため、毎時更新のスライス用に bypass を与えたり PR を量産したりしない。
+  代わりに両 repo の指摘も private の全体一覧へだけ載せる。
 - **issue ではなくファイル**にするのは、どのエージェントでも能力ゼロで読めるようにするため。issue を読むには
   GitHub API アクセスが要り、エージェントのランタイム依存になる（`.ops-sync/tasks/` と同じ「物理的に届ける」
   作法。→「解決したい問題」）。
