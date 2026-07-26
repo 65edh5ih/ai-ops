@@ -1,7 +1,7 @@
 # CI ログ運用（組み込みと、失敗時の切り分け）
 
 CI ログは AI エージェント専用なので `main` を汚さない専用ブランチ `ci-logs`（main から分岐・orphan）へ
-slice 単位で publish する。このための composite action `.github/actions/publish-ci-logs` は **ai-ops が全 consumer へ
+slice 単位で publish する。このための composite action `.github/actions/publish-ci-logs` は **ops-sync が全 consumer へ
 配布する共通インフラ**（`shared/` 同期。手で編集しない）。
 
 ## いつ使うか（トリガ）
@@ -12,7 +12,7 @@ slice 単位で publish する。このための composite action `.github/actio
 ## 前提・パラメータ
 
 - **公開先**: 実行したリポジトリの `ci-logs` ブランチ。private リポジトリのものは非公開、public
-  リポジトリ（ai-ops 等）のものは**世界公開**になる——後者に機微を出さない（MUST NOT）。
+  リポジトリ（ops-sync 等）のものは**世界公開**になる——後者に機微を出さない（MUST NOT）。
 - **`ci-logs` は恒久ログ専用**。追記型なので**ファイルを消しても内容は git 履歴に残る**（public
   リポジトリでは削除が削除にならない）。よって「現在値を読ませ続けるもの」（CI ログ・quota 信号）だけを
   置き、**読んだら用済みの一次データを混ぜない**（MUST NOT）。後者は専用の揮発ブランチへ出す

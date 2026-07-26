@@ -18,7 +18,7 @@
 // 出力: <AQ_OUTPUT_DIR>/actions.json
 //   { state, threshold_pct, stale_after_hours, checked_at, source, note }
 //
-// **公開先が world-public なので生の分数・使用率は出力しない**（ai-ops の ci-logs は世界公開。
+// **公開先が world-public なので生の分数・使用率は出力しない**（ops-sync の ci-logs は世界公開。
 // 「このアカウントは今 CI 枠に余裕があるか」の粗い band だけで rule は成立するため、
 // 実数はアカウント側の billing 画面に留める）。state の意味:
 //   ok        … 使用率 < threshold。分散モードを使ってよい
@@ -89,7 +89,7 @@ async function api(path) {
         accept: 'application/vnd.github+json',
         authorization: `Bearer ${token}`,
         'x-github-api-version': '2022-11-28',
-        'user-agent': 'ai-ops-actions-quota',
+        'user-agent': 'ops-sync-actions-quota',
       },
     });
     let body = null;

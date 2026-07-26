@@ -4,10 +4,10 @@ name: Actions quota
 # 粗い状態信号として公開する。エージェントは分散モードの net-fetch（private repo 実行）を使う前に
 # これを読み、`ok` 以外なら実行しない（手順: shared/docs/actions-quota.md）。
 #
-# **ai-ops でだけ動かす**（shared/ に置かず consumer へ配布しない）。理由:
+# **ops-sync でだけ動かす**（shared/ に置かず consumer へ配布しない）。理由:
 #   - Actions の月枠は **アカウント単位**で、`65edh5ih` 配下の private repo すべてが同じ枠を共有する。
 #     したがって測定は1箇所でよく、consumer ごとに測る意味がない。
-#   - ai-ops は public なのでこの workflow 自身の実行分は無料（枠を測るために枠を食う矛盾を避ける）。
+#   - ops-sync は public なのでこの workflow 自身の実行分は無料（枠を測るために枠を食う矛盾を避ける）。
 #   - consumer 側に billing PAT を配らずに済む（「consumer に常設トークンを増やさない」原則を守る）。
 #
 # secret `ACTIONS_QUOTA_TOKEN` が未設定なら state=unknown を publish して緑で終わる（consumer 側は
@@ -100,7 +100,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # docs/ci-logs.md 手順3。結果 JSON と同じ slice にスクリプトログも載せる。
-      # **publish 先（ai-ops の ci-logs）は世界公開なので、万一ログに token 形が混ざっても外に残さない**
+      # **publish 先（ops-sync の ci-logs）は世界公開なので、万一ログに token 形が混ざっても外に残さない**
       # （スクリプトは token を出力しないが、保険として net-fetch と同じ伏字方針を適用する）。
       - name: Stage CI log snapshot
         if: always()

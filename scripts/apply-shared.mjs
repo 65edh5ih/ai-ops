@@ -1,26 +1,31 @@
-// ai-ops の配布物を consumer のチェックアウトへミラーする（下り・ファイル配布）。
+// ops-sync の配布物を consumer のチェックアウトへミラーする（下り・ファイル配布）。
 //   - shared/<path>              → <consumer>/<path>（ディレクトリ構造を維持してコピー）
-//   - tasks/<owner>/<repo>/<f>   → <consumer>/.ai-ops/tasks/<f>（その consumer 宛のタスクのみ）
+//   - tasks/<owner>/<repo>/<f>   → <consumer>/.ops-sync/tasks/<f>（その consumer 宛のタスクのみ）
 //
 // skill ミラーの自動導出: 正本 shared/.claude/skills/** は、各エージェント向けの
 // .codex/.openhands/.gemini/.agents の skills/ にも同内容で配布する（配布時に導出）。
-// 以前は ai-ops 側に symlink を1エージェントぶんずつ手で置いていたが、完全に機械的な複製で
+// 以前は ops-sync 側に symlink を1エージェントぶんずつ手で置いていたが、完全に機械的な複製で
 // 張り忘れのドリフト源だったため、リポジトリには正本だけを置く方式に変えた。
 // 新エージェント対応は SKILL_MIRROR_ROOTS への追加1行。
 //
-// 配布したファイル一覧を consumer の .ai-ops/sync-manifest.txt に記録し、
+// 配布したファイル一覧を consumer の .ops-sync/sync-manifest.txt に記録し、
 // **前回 manifest にあって今回の配布物に無いパスは削除する**（shared/ での撤去・改名や
 // タスク消化を consumer へ伝播させる。旧実装は追加・更新しかできず、消したファイルが
 // consumer に残留するドリフトがあった）。
-// さらに ai-ops の sync-deletions.txt に列挙されたパスも削除する（manifest 導入前から
+// さらに ops-sync の sync-deletions.txt に列挙されたパスも削除する（manifest 導入前から
 // consumer に置かれている unmanaged ファイルの撤去用）。
 //
 // 中身が同じファイルは書かない（PR を無駄に作らないため）。
-// 使い方: node apply-shared.mjs <ai-ops root> <consumer checkout root> <owner/repo>
+// 使い方: node apply-shared.mjs <ops-sync root> <consumer checkout root> <owner/repo>
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, rmSync, statSync, chmodSync } from 'node:fs';
 import path from 'node:path';
 
-const MANIFEST = '.ai-ops/sync-manifest.txt';
+const MANIFEST = '.ops-sync/sync-manifest.txt';
+// 旧 manifest（リポジトリ名が ai-ops だった頃）。consumer にはまだこちらが残っているので、
+// 削除判定では新旧の和を見て、旧 manifest ファイル自体も撤去する（manifest は manifest に載らないため
+// 差分削除では消えない）。旧配置の .ai-ops/tasks/** は旧 manifest に載っているので自動で消える。
+// 全 consumer から .ai-ops/ が消えたら、この定数と後方互換の分岐は削除してよい。
+const LEGACY_MANIFEST = '.ai-ops/sync-manifest.txt';
 
 // skill の正本ディレクトリと、そこから導出する各エージェントのミラー先
 // （.agents=Antigravity / .qwen=Qwen Code / .cline=Cline。いずれも <root>/skills/<name>/SKILL.md を
@@ -30,7 +35,7 @@ const SKILL_MIRROR_ROOTS = ['.codex', '.openhands', '.gemini', '.agents', '.qwen
 
 const [, , aiOpsRoot, targetRoot, consumerSlug] = process.argv;
 if (!aiOpsRoot || !targetRoot || !consumerSlug) {
-  console.error('usage: node apply-shared.mjs <ai-ops root> <consumer root> <owner/repo>');
+  console.error('usage: node apply-shared.mjs <ops-sync root> <consumer root> <owner/repo>');
   process.exit(2);
 }
 
@@ -79,7 +84,7 @@ for (const [rel, src] of [...desired]) {
 const tasksRoot = path.join(aiOpsRoot, 'tasks', consumerSlug);
 if (existsSync(tasksRoot)) {
   for (const rel of walk(tasksRoot)) {
-    desired.set(path.posix.join('.ai-ops/tasks', rel.split(path.sep).join('/')), path.join(tasksRoot, rel));
+    desired.set(path.posix.join('.ops-sync/tasks', rel.split(path.sep).join('/')), path.join(tasksRoot, rel));
   }
 }
 
@@ -106,9 +111,12 @@ for (const [rel, src] of desired) {
 }
 
 // 削除: (前回 manifest ∪ sync-deletions.txt) のうち、今回の配布物に無い既存ファイル
-const oldManifest = readList(path.join(targetRoot, MANIFEST));
+const oldManifest = [
+  ...readList(path.join(targetRoot, MANIFEST)),
+  ...readList(path.join(targetRoot, LEGACY_MANIFEST)), // 移行: 旧 manifest 記載分も削除対象に含める
+];
 const tombstones = readList(path.join(aiOpsRoot, 'sync-deletions.txt'));
-for (const rel of new Set([...oldManifest, ...tombstones])) {
+for (const rel of new Set([...oldManifest, ...tombstones, LEGACY_MANIFEST])) {
   const norm = rel.split(path.sep).join('/');
   if (desired.has(norm) || !safeRel(norm)) continue;
   const dst = path.join(targetRoot, norm);

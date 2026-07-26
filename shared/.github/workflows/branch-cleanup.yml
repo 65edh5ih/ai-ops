@@ -1,13 +1,13 @@
 name: Branch cleanup
 
-# エージェント生成の stale ブランチ（claude/*, codex/*, ai-ops/* 等）を手動で一括削除する。
+# エージェント生成の stale ブランチ（claude/*, codex/*, ops-sync/* 等）を手動で一括削除する。
 # GitHub の "Automatically delete head branches" は「マージされた PR の head」しか消さないため、
 # マージせず close した PR・PR の無いブランチ・設定 ON より前からあるブランチは残り続ける。それが
 # 溜まると Cloudflare Workers Builds の接続ダイアログで Production branch 一覧（アルファベット順・
 # 先頭ページのみ）に main が載らなくなる等の実害が出る。
 #
-# 正本は ai-ops の shared/.github/workflows/branch-cleanup.yml。consumer（private / nikki-san）へは
-# ai-ops の sync がそこから配布する。ai-ops 自身は sync の consumer ではないため .github/workflows/
+# 正本は ops-sync の shared/.github/workflows/branch-cleanup.yml。consumer（private / nikki-san）へは
+# ops-sync の sync がそこから配布する。ops-sync 自身は sync の consumer ではないため .github/workflows/
 # にも同一コピーを置く（変更するときは両方を同時に直す）。
 #
 # 手動のみ（workflow_dispatch）。**既定は dry-run（削除せず対象を一覧するだけ）**。実削除は
@@ -28,7 +28,7 @@ on:
       prefixes:
         description: '削除対象にするブランチ名プレフィックス（空白区切り）'
         type: string
-        default: 'claude/ codex/ codex- ai-ops/ import-posts-'
+        default: 'claude/ codex/ codex- ops-sync/ import-posts-'
       keep:
         description: '常に保護するブランチ名（空白区切り。既定ブランチとオープン PR の head は自動保護）'
         type: string

@@ -10,7 +10,7 @@
 // いずれもエントリ本文は書き直さない（体裁はそのまま・スライスの移動だけ）。
 //
 // この処理は完全に機械的なので、エージェントのセッションではなく
-// .github/workflows/archive-task-history.yml（ai-ops 集中バッチ）から実行する。
+// .github/workflows/archive-task-history.yml（ops-sync 集中バッチ）から実行する。
 //
 // 使い方: node archive-task-history.mjs <repo root>
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
@@ -61,7 +61,7 @@ const inboxBlocks = [];
 const consumedFiles = [];
 if (existsSync(inboxDir)) {
   // README.md は取り込まない: ディレクトリを常に git 追跡状態に保つプレースホルダ
-  // （ai-ops が配布・維持）。これを消すと、全フラグメント統合後に inbox が空になり
+  // （ops-sync が配布・維持）。これを消すと、全フラグメント統合後に inbox が空になり
   // fresh checkout で「書き込み先」ディレクトリごと消える。
   const files = readdirSync(inboxDir)
     .filter((f) => f.endsWith('.md') && f.toLowerCase() !== 'readme.md')

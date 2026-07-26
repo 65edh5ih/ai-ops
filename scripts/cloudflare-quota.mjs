@@ -23,7 +23,7 @@
 //
 // 出力: <CFQ_OUTPUT_DIR>/cloudflare.json（全体 state ＋ リソース別 state）
 //
-// **公開先が world-public なので生の使用量・上限は出力しない**（ai-ops の ci-logs は世界公開。
+// **公開先が world-public なので生の使用量・上限は出力しない**（ops-sync の ci-logs は世界公開。
 // actions-quota と同じ方針で band と閾値だけを出す）。
 //
 // **使用率だけで判定しない**のが要点: Pages は月内で 19% でも、設定次第で日次レートが 10 倍変わる。
@@ -87,7 +87,7 @@ const UNKNOWN = (note) => emit('unknown', {
 async function api(path) {
   try {
     const res = await fetch(`${API}${path}`, {
-      headers: { authorization: `Bearer ${token}`, 'user-agent': 'ai-ops-cloudflare-quota' },
+      headers: { authorization: `Bearer ${token}`, 'user-agent': 'ops-sync-cloudflare-quota' },
     });
     let body = null;
     try { body = await res.json(); } catch { /* JSON でないことがある */ }

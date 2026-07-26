@@ -5,7 +5,7 @@ name: Archive task histories
 #      docs/AI_TASK_HISTORY.md へ取り込み、取り込んだフラグメントを削除する（consolidate）。
 #   2. 取り込み後、保持量（直近2作業日分）を超えた古い日付のエントリを
 #      docs/history-archive/<YYYY>.md へ移す（archive）。
-# ai-ops 自身と全 consumer を1日1回巡回し、統合すべきフラグメントか超過エントリがあるリポジトリにだけ
+# ops-sync 自身と全 consumer を1日1回巡回し、統合すべきフラグメントか超過エントリがあるリポジトリにだけ
 # PR を生成する（無ければ何もしない）。
 #
 # consolidate/archive はどちらも決定的なファイル移動なので、エージェントのセッション（完了手順）ではなく
@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - id: read
-        # ai-ops 自身＋consumers.txt（# と空行を除く）を JSON 配列にしてマトリクスへ渡す
+        # ops-sync 自身＋consumers.txt（# と空行を除く）を JSON 配列にしてマトリクスへ渡す
         run: |
           list=$({ echo "${{ github.repository }}"; grep -vE '^[[:space:]]*(#|$)' consumers.txt; } | jq -R . | jq -cs .)
           echo "list=$list" >> "$GITHUB_OUTPUT"
@@ -43,7 +43,7 @@ jobs:
       matrix:
         repo: ${{ fromJson(needs.prepare.outputs.repos) }}
     steps:
-      - name: Checkout ai-ops (script source)
+      - name: Checkout ops-sync (script source)
         uses: actions/checkout@v5
 
       - name: Checkout target repo
@@ -73,7 +73,7 @@ jobs:
           token: ${{ secrets.OPS_SYNC_TOKEN }}
           path: target
           base: main
-          branch: ai-ops/archive-task-history
+          branch: ops-sync/archive-task-history
           delete-branch: true
           commit-message: 'chore: consolidate task history fragments and archive overflow'
           title: 'chore: タスク履歴フラグメントの統合と古いエントリのアーカイブ'
@@ -84,7 +84,7 @@ jobs:
               取り込んだフラグメントを削除します。
             - 取り込み後、保持量（直近2作業日分）を超えた古い日付のエントリを `docs/history-archive/` へ移します。
 
-            この PR は ai-ops の archive-task-history workflow（1日1回の集中バッチ）が自動生成しました。
+            この PR は ops-sync の archive-task-history workflow（1日1回の集中バッチ）が自動生成しました。
 
       - name: Merge archive PR (per MERGE_MODE)
         if: env.MERGE_MODE != 'off' && steps.create-pr.outputs.pull-request-url != ''

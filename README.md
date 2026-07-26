@@ -1,4 +1,4 @@
-# ai-ops
+# ops-sync
 
 AIエージェント（Codex / Claude Code / Gemini CLI / Qwen Code / Kimi Code CLI / OpenHands / GitHub Copilot /
 Continue / Cursor / Cline / Windsurf / Antigravity）向けの
@@ -23,8 +23,8 @@ Continue / Cursor / Cline / Windsurf / Antigravity）向けの
 入口 symlink は sync が各 consumer に自動配線する（`scripts/apply-entrypoints.mjs`）ので、正本はプレーンな
 `AGENTS.md` 一本でよい（plugin / hook に依存しない＝エージェント非依存）。OpenHands V0 だけは AGENTS.md を
 既定で読まないため、`shared/.openhands/microagents/repo.md`（AGENTS.md へのポインタ）で誘導する。GitHub Copilot
-（`.github/copilot-instructions.md`）・Continue（`.continue/rules/ai-ops.md`）・Cursor（`.cursor/rules/ai-ops.mdc`）・
-Cline（`.clinerules/ai-ops.md`）・Windsurf（`.windsurf/rules/ai-ops.md`）も同様に、`shared/` 配布の固定内容
+（`.github/copilot-instructions.md`）・Continue（`.continue/rules/ops-sync.md`）・Cursor（`.cursor/rules/ops-sync.mdc`）・
+Cline（`.clinerules/ops-sync.md`）・Windsurf（`.windsurf/rules/ops-sync.md`）も同様に、`shared/` 配布の固定内容
 ポインタから AGENTS.md へ誘導する（入口が実ファイルなので symlink 配線は不要）。Codex / Kimi Code CLI /
 Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は既定の `QWEN.md` に加え AGENTS.md も読むため
 入口 symlink を張ると二重ロードになる＝張らない。ただし `.qwen/skills/` の skill ミラーは配る）ため、
@@ -34,7 +34,7 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 
 | ファイル | 役割 |
 |---|---|
-| `AGENTS.md` | ai-ops で作業するエージェント向けの指示・置き場所の判断ルール |
+| `AGENTS.md` | ops-sync で作業するエージェント向けの指示・置き場所の判断ルール |
 | `shared/docs/ops-sync-design.md` | 仕組みの設計ドキュメント（アーキテクチャ・判断根拠） |
 | `AGENTS_COMMON.md` | 共通ルール本体（**ここだけを編集する**） |
 | `shared/**` | （下り）consumer へ配布する実ファイル・共通 doc。consumer のパスをミラー |
@@ -45,10 +45,10 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 | `scripts/apply-entrypoints.mjs` | （下り）consumer に `CLAUDE.md` / `GEMINI.md` → `AGENTS.md` の入口 symlink を配線 |
 | `scripts/apply-shared.mjs` | （下り）`shared/**`・`tasks/**` の配置（正本の実行ビットを保持）と、manifest 差分による削除の伝播、skill ミラーの自動生成 |
 | `.github/workflows/sync.yml` | （下り）変更時＋cron（1日1回の再適用＝手編集ドリフトの自己修復）で各 consumer へ同期PRを自動生成（MERGE_MODE で自動マージ可） |
-| `scripts/collect-outbox.mjs` | （上り）consumer の `.ai-ops/outbox/*.md` 提案を種別に応じて反映（1 consumer 分をまとめて処理・不正な提案は `rejected/` へ差し戻し） |
+| `scripts/collect-outbox.mjs` | （上り）consumer の `.ops-sync/outbox/*.md` 提案を種別に応じて反映（1 consumer 分をまとめて処理・不正な提案は `rejected/` へ差し戻し） |
 | `.github/workflows/collect-outbox.yml` | （上り）cron（約6時間ごと）＋手動で提案を拾い、取り込みPR＋掃除PRを生成。あわせてトゥームストーン掃除 |
 | `scripts/archive-task-history.mjs` | （保守）`docs/history-inbox/` のフラグメントを本体へ統合し、保持量超過分を `docs/history-archive/` へ移す |
-| `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ai-ops＋全 consumer を巡回し、未統合フラグメント／超過分の統合＋アーカイブPRを生成・マージ |
+| `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ops-sync＋全 consumer を巡回し、未統合フラグメント／超過分の統合＋アーカイブPRを生成・マージ |
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer で削除済み）を自動で刈る |
 | `scripts/actions-quota.mjs` | （信号）billing API で Actions 月枠の使用率を測り、`ok`/`tight`/`exhausted`/`unknown` の粗い state に落とす |
 | `.github/workflows/actions-quota.yml` | （信号）cron（6時間ごと）で上記を実行し `ci-logs` の `quota/actions/actions.json` へ publish。エージェントが private repo で workflow を回してよいかの判断に使う（手順: `shared/docs/actions-quota.md`） |
@@ -57,38 +57,38 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 
 ## 実行基盤（ops-runner）
 
-**エージェントが dispatch する計算は ai-ops では動かさない。** 専用の consumer
+**エージェントが dispatch する計算は ops-sync では動かさない。** 専用の consumer
 **`65edh5ih/ops-runner`（public）**で動かす。現状の対象は net-fetch（集約モード）で、
 その workflow・allowlist・共通ルールは通常の配布でここへ届く（runner 側に固有の配線は無い）。
 
 - **境界の判定は「`OPS_SYNC_TOKEN` が要るか」**。要るもの（sync / collect-outbox / archive /
-  branch-cleanup）と、外部入力を取らない cron（quota 信号）は ai-ops。エージェントが任意に起動し、
+  branch-cleanup）と、外部入力を取らない cron（quota 信号）は ops-sync。エージェントが任意に起動し、
   外部 URL の中身を持ち込むものは ops-runner。→ `shared/docs/ops-sync-design.md`「実行基盤の分離」
 - **ops-runner は public 必須**。無料枠で回すため（private だとアカウント単位の Actions 枠を消費する）。
   帰結として、配布物も net-fetch の取得結果も**世界公開**になる。機微を取得しうるものは集約モードに
   流さない（分散モード＝作業中の private リポジトリで実行する。→ `shared/docs/net-fetch.md`）。
 - **ops-runner に secret を置かない**（`github.token` のみ）。これが分離の目的そのもの。
-- 集約モードの dispatch 先・結果の読み戻し先はどちらも ops-runner。ただし **allowlist の正本は ai-ops の
-  `shared/.github/net-allowlist.txt`**、**Actions 月枠の信号は ai-ops の `ci-logs`** で、これらは移っていない。
+- 集約モードの dispatch 先・結果の読み戻し先はどちらも ops-runner。ただし **allowlist の正本は ops-sync の
+  `shared/.github/net-allowlist.txt`**、**Actions 月枠の信号は ops-sync の `ci-logs`** で、これらは移っていない。
 
 ## セットアップ（1回だけ）
 
-1. fine-grained PAT を発行（対象: ai-ops と全 consumer / 権限: **Contents: RW**, **Pull requests: RW**, **Workflows: RW**）。
+1. fine-grained PAT を発行（対象: ops-sync と全 consumer / 権限: **Contents: RW**, **Pull requests: RW**, **Workflows: RW**）。
    Workflows:RW は `shared/.github/workflows/`（例: `branch-cleanup.yml`・`net-fetch.yml`）を consumer へ配布するために必須
    （GitHub は `.github/workflows/` 配下を Workflows 権限の無い PAT で push させない。無いと sync が失敗する）。
-2. 本リポジトリの Actions Secret（<https://github.com/65edh5ih/ai-ops/settings/secrets/actions>。
+2. 本リポジトリの Actions Secret（<https://github.com/65edh5ih/ops-sync/settings/secrets/actions>。
    メニュー: Settings → Secrets and variables → Actions → Secrets）に **`OPS_SYNC_TOKEN`** として登録。
-3. ai-ops の `main` にブランチ保護を掛ける（PAT による直 push の防止）。
+3. ops-sync の `main` にブランチ保護を掛ける（PAT による直 push の防止）。
 4. `AGENTS_COMMON.md` を main に置く（初回 push で workflow が走り、各 consumer へ配線PRが立つ）。
 5. **Actions 月枠の信号用に2本目の PAT を発行**（権限: **Account permissions → Plan: Read-only** のみ。
    billing API は repo スコープでは読めないためアカウント権限が要る）。発行画面:
    <https://github.com/settings/personal-access-tokens>（メニュー: Settings → Developer settings →
    Personal access tokens → Fine-grained tokens）。本リポジトリの Actions Secret
-   （<https://github.com/65edh5ih/ai-ops/settings/secrets/actions>）に
+   （<https://github.com/65edh5ih/ops-sync/settings/secrets/actions>）に
    **`ACTIONS_QUOTA_TOKEN`** として登録する。**未登録だと `quota/actions/actions.json` が `unknown` のままになり、
    全 consumer のエージェントが private repo での自発的な workflow 実行を止める**（安全側だが何も動かせない）。
    しきい値を既定の 90% から変えるときは repo variable `ACTIONS_QUOTA_THRESHOLD_PCT` を設定する
-   （<https://github.com/65edh5ih/ai-ops/settings/variables/actions>。メニュー: Settings →
+   （<https://github.com/65edh5ih/ops-sync/settings/variables/actions>。メニュー: Settings →
    Secrets and variables → Actions → Variables）。
    **プランの含有枠が GitHub Free の 2,000 分でないときは repo variable `ACTIONS_QUOTA_INCLUDED_MINUTES` に
    実際の分数を設定する**（enhanced billing platform の API は含有枠を返さないため設定値で持つ。旧 API が
@@ -96,13 +96,13 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 6. **Cloudflare 月枠の信号用に、読み取り専用の CF API トークンを発行**（<https://dash.cloudflare.com/profile/api-tokens>。
    **user-scoped で作る**——Workers Builds API は account-scoped トークンを受け付けない。権限:
    **Cloudflare Pages: Read** ＋ **Workers Builds Configuration: Read** ＋ **Workers Scripts: Read**）。
-   本リポジトリの Actions Secret（<https://github.com/65edh5ih/ai-ops/settings/secrets/actions>）に
-   **`CLOUDFLARE_QUOTA_TOKEN`**、アカウント ID を **`CLOUDFLARE_ACCOUNT_ID`** として登録する。**書き込み権限を持たせないこと**（ai-ops は public。
+   本リポジトリの Actions Secret（<https://github.com/65edh5ih/ops-sync/settings/secrets/actions>）に
+   **`CLOUDFLARE_QUOTA_TOKEN`**、アカウント ID を **`CLOUDFLARE_ACCOUNT_ID`** として登録する。**書き込み権限を持たせないこと**（ops-sync は public。
    切替に要る Edit 権限の操作は consumer 側が自分のトークンで行う）。未登録なら
    `quota/cloudflare/cloudflare.json` が `unknown` のままになる（安全側）。上限・閾値を変えるときは repo variable
    `CLOUDFLARE_PAGES_BUILDS_LIMIT`（既定 500）・`CLOUDFLARE_WORKERS_BUILD_MINUTES_LIMIT`（既定 3000）・
    `CLOUDFLARE_QUOTA_THRESHOLD_PCT`（既定 90）・`CLOUDFLARE_QUOTA_RATE_DAYS`（既定 7）を
-   <https://github.com/65edh5ih/ai-ops/settings/variables/actions> で設定する。
+   <https://github.com/65edh5ih/ops-sync/settings/variables/actions> で設定する。
 
 consumer 側のセットアップは**不要**（workflow・Secret とも置かない）。
 
@@ -113,7 +113,7 @@ consumer 側のセットアップは**不要**（workflow・Secret とも置か�
   リポジトリ固有の手順 doc にも適用される）。共通 SOP には `shared/.claude/skills/<name>/SKILL.md` の skill
   ラッパーを添えると、Claude Code / Codex / OpenHands（V1）/ Gemini CLI / Qwen Code / Cline / Antigravity が
   自動発火できる（各エージェント向けミラー `.codex` / `.openhands` / `.gemini` / `.agents`〔Antigravity〕/
-  `.qwen`〔Qwen Code〕/ `.cline`〔Cline〕は apply-shared が配布時に自動生成する。ai-ops に置くのは正本1ファイルだけ）。
+  `.qwen`〔Qwen Code〕/ `.cline`〔Cline〕は apply-shared が配布時に自動生成する。ops-sync に置くのは正本1ファイルだけ）。
   OpenHands V0 は skill を読まないため、
   常時ロードの `shared/.openhands/microagents/repo.md`（AGENTS.md へのポインタ）経由で、AGENTS.md →
   `docs/<name>.md` を辿らせる（詳細は `shared/docs/ops-sync-design.md`「前提・限界」）。
@@ -125,15 +125,15 @@ consumer 側のセットアップは**不要**（workflow・Secret とも置か�
 - **consumer を増やす**: `consumers.txt` に追記し、PAT のアクセス対象にもそのリポジトリを追加する。
 - **タスク履歴の統合・アーカイブ**: 自動。エージェントは履歴を本体に直接書かず、1エントリ＝1ファイルで
   `docs/history-inbox/`（→ `shared/docs/task-history.md`）に置く（並行 PR のコンフリクト回避）。
-  *Archive task histories* workflow（cron 1日1回）が ai-ops と全 consumer を巡回し、フラグメントを
+  *Archive task histories* workflow（cron 1日1回）が ops-sync と全 consumer を巡回し、フラグメントを
   `docs/AI_TASK_HISTORY.md` へ統合＋保持量（直近2作業日分）超過分をアーカイブする PR を自動マージする。
   統合時、本体に既にある同一本文のエントリは取り込まず、そのフラグメントは削除して掃除する（重複記録の防止）。
   急ぐときは workflow を手動実行する。`docs/history-inbox/` は配布された `README.md` プレースホルダ
   （正本 `shared/docs/history-inbox/README.md`）で常設し、全フラグメント統合後もディレクトリが消えないようにする。
 - **同期PRのマージ**: `sync.yml` の `MERGE_MODE` で選ぶ。`direct`（即マージ・完全自動）/
   `auto`（GitHub auto-merge。consumer に branch protection＋required checks が必要）/ `off`（手動）。
-  現在は `direct`（内容レビューは ai-ops のマージ時に済んでいる、という設計）。ただし **Codex は
-  マージ後の consumer 同期 PR を数分後にレビューすることがあり**、ai-ops 本体 PR に出ない指摘が出うる。
+  現在は `direct`（内容レビューは ops-sync のマージ時に済んでいる、という設計）。ただし **Codex は
+  マージ後の consumer 同期 PR を数分後にレビューすることがあり**、ops-sync 本体 PR に出ない指摘が出うる。
   **配布に影響する変更をマージしたら下流の同期 PR の Codex/CI を確認する**（対象の入力範囲・手順とも
   正本は `AGENTS.md`「配布変更のダウンストリーム確認」。scope をここに列挙しないのは AGENTS.md と二重化して
   ドリフトさせないため）。
@@ -143,14 +143,14 @@ consumer 側のセットアップは**不要**（workflow・Secret とも置か�
 
 ### 上り（consumer 起点で共通ルール・ファイルを直す／作業を依頼する）
 
-consumer での作業中に AI エージェントが気づいたことは、作業リポジトリの `.ai-ops/outbox/` に
+consumer での作業中に AI エージェントが気づいたことは、作業リポジトリの `.ops-sync/outbox/` に
 提案ファイルとして置くだけでよい（書式: `shared/docs/outbox-proposal.md`。consumer では
-`docs/outbox-proposal.md`）。ai-ops の collect workflow（cron 約6時間ごと）が拾い、
-**取り込み PR**（ai-ops 側。同一リポジトリの提案はまとめて1本、`common-block-edit` には
+`docs/outbox-proposal.md`）。ops-sync の collect workflow（cron 約6時間ごと）が拾い、
+**取り込み PR**（ops-sync 側。同一リポジトリの提案はまとめて1本、`common-block-edit` には
 常時層サイズの増減を自動記載）と **outbox 掃除 PR**（consumer 側）を自動生成する。
-不正な提案は取り込まれず `.ai-ops/outbox/rejected/` へエラーノート付きで差し戻される
+不正な提案は取り込まれず `.ops-sync/outbox/rejected/` へエラーノート付きで差し戻される
 （後続の提案は止まらない）。オーナーが取り込み PR をマージすると全 consumer へ配布される。
-急ぐときは ai-ops の *Collect outbox proposals* workflow を手動実行する。
+急ぐときは ops-sync の *Collect outbox proposals* workflow を手動実行する。
 
 ## 前提・限界
 

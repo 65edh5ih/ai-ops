@@ -14,7 +14,7 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
 ## 前提・パラメータ
 
 - **取得先ドメインが allowlist にあること**。allowlist は2層の union:
-  - 共通ベース: `.github/net-allowlist.txt`（ai-ops が全リポジトリへ配布。**public な ops-runner にも配られ、
+  - 共通ベース: `.github/net-allowlist.txt`（ops-sync が全リポジトリへ配布。**public な ops-runner にも配られ、
     集約モードの判定に使われる**ため、機微を取得しうるドメインは**書かない**）。
   - リポジトリ固有: `.github/net-allowlist.local.txt`（各リポジトリが自分で持つ・配布対象外・任意）。
     **機微を取得しうるドメインはここ（private リポジトリのローカル）にだけ書く**。
@@ -55,7 +55,7 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
     （MUST NOT。モードは可視性・機微性で選ぶ原則を崩し、public 相当の取得を private 枠・非公開の結果ブランチに
     落とすため）。分散を使うのは取得内容が機微で分散が正しいときだけ。
   - **分散モードで起動する前に、Actions 月枠の逼迫状態を確認する**（MUST）。手順と信号の読み方は
-    [`docs/actions-quota.md`](actions-quota.md)（ai-ops が billing API で実測し、`ci-logs` の
+    [`docs/actions-quota.md`](actions-quota.md)（ops-sync が billing API で実測し、`ci-logs` の
     `quota/actions/actions.json` に粗い state を公開している）。**`ok` 以外（`tight` / `exhausted` / `unknown`）
     なら分散モードで dispatch しない**（MUST NOT）——停止してユーザーに判断を仰ぐ。枠が尽きた状態での
     実行は run の失敗に留まらず、spending limit の設定次第で**実費課金**につながる。
@@ -82,13 +82,13 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
 3. **取得先が allowlist に無ければ、ここで停止してユーザーに手動追加を依頼する**（MUST）。エージェントが
    勝手に (a) 分散モードへ切り替えて回避する・(b) 自分で allowlist にドメインを足して続行する、のは**しない**
    （MUST NOT）。**allowlist に何を許すかはユーザーが決める**。依頼には「どのファイルに何を足すか」を明示する:
-   - **共通ベースに足す**（＝ ai-ops 側の変更）: `shared/.github/net-allowlist.txt` が**唯一の正本**。
-     **エージェントが ai-ops をセッションから直接参照できている（`add_repo` 等）なら、outbox を
-     経由せずそこで直接ブランチを切って編集し、ai-ops 自身に PR を出す**（人間のマージだけを待てばよく、
-     collect workflow の非同期cron待ち（約6時間）を挟まない分速い）。**ai-ops を直接参照する手段を持たない
+   - **共通ベースに足す**（＝ ops-sync 側の変更）: `shared/.github/net-allowlist.txt` が**唯一の正本**。
+     **エージェントが ops-sync をセッションから直接参照できている（`add_repo` 等）なら、outbox を
+     経由せずそこで直接ブランチを切って編集し、ops-sync 自身に PR を出す**（人間のマージだけを待てばよく、
+     collect workflow の非同期cron待ち（約6時間）を挟まない分速い）。**ops-sync を直接参照する手段を持たない
      エージェントだけ** `種別: shared-file` の outbox 提案（→ `docs/outbox-proposal.md`）を使う。
-     ここで参照が要るのは**正本のある ai-ops** で、step 2 でセッションに足す実行先の ops-runner とは別物
-     （両方に足しても構わないが、allowlist を直せるのは ai-ops だけ）。どちらの経路でも編集するのは
+     ここで参照が要るのは**正本のある ops-sync** で、step 2 でセッションに足す実行先の ops-runner とは別物
+     （両方に足しても構わないが、allowlist を直せるのは ops-sync だけ）。どちらの経路でも編集するのは
      `shared/` の1ファイルで、ops-runner や consumer に届く同名ファイルは sync が配る複製なので触らない。
      **機微を取得しうるドメインは共通ベースに入れない**（world-public な集約経路を通ってしまう。ただし
      「ドメイン自体が機微か」で判断する——多数ユーザーの公開コンテンツを配信する汎用CDNは、たまたま
@@ -153,7 +153,7 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
   リポジトリ内の `.github/net-allowlist.txt` と `.github/net-allowlist.local.txt` だけ**で、両者は無関係。
   実行環境側に足しても net-fetch の allowlist 判定は変わらない（逆も同じ）。step 3 でユーザーに追加を
   依頼するときは、**どちらの層のどのファイルか**を取り違えないこと（MUST）。共通ベースの正本は
-  ai-ops の `shared/.github/net-allowlist.txt` の1ファイルで、consumer 側に配布された同名ファイルは
+  ops-sync の `shared/.github/net-allowlist.txt` の1ファイルで、consumer 側に配布された同名ファイルは
   複製なので編集しても効かない。
 - **結果の出口を GitHub Actions の artifact に変えようとする**: 一見「`retention-days` で自動失効するので
   揮発させるのに最適」に見えるが、**エージェントからは読めない**（MUST NOT: 出口を artifact に変える）。

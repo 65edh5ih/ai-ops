@@ -1,5 +1,5 @@
 #!/bin/bash
-# 配布フック（正本: ai-ops shared/.claude/hooks/session-start.sh。手編集しない・直したいときは outbox 提案）。
+# 配布フック（正本: ops-sync shared/.claude/hooks/session-start.sh。手編集しない・直したいときは outbox 提案）。
 # セッション開始時に:
 #   1. マージ済みブランチ再push を弾く pre-push フックを有効化（core.hooksPath）。
 #   2. docs/AI_CONTEXT.md があれば全文注入（真の必読＝実質どのタスクでも要るプロジェクト前提。

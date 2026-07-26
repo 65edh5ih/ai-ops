@@ -1,13 +1,13 @@
 name: Collect outbox proposals from consumers
 
-# consumer → ai-ops の「上り」。最古の提案を持つ consumer の .ai-ops/outbox/*.md を
+# consumer → ops-sync の「上り」。最古の提案を持つ consumer の .ops-sync/outbox/*.md を
 # まとめて拾い、種別に応じて処理する:
 #   - common-block-edit : AGENTS_COMMON.md への取り込み PR を生成
 #   - shared-file       : shared/<対象パス> への配置 PR を生成
 #   - task              : tasks/<対象リポジトリ>/ への登録 PR を生成
 #   - task-done         : tasks/<提案元>/<対象ファイル> の削除 PR を生成
-# ai-ops 側の取り込み PR（全提案まとめて1本）と consumer 側の cleanup PR の 2 本を自動生成。
-# 取り込み PR のマージは人間（オーナー）が行う。不正な提案は .ai-ops/outbox/rejected/ へ
+# ops-sync 側の取り込み PR（全提案まとめて1本）と consumer 側の cleanup PR の 2 本を自動生成。
+# 取り込み PR のマージは人間（オーナー）が行う。不正な提案は .ops-sync/outbox/rejected/ へ
 # エラーノート付きで差し戻す（キューを塞がない）。同一実行内で衝突する提案（2件目の
 # common-block-edit 等）と他 consumer の提案は次回実行に回る。
 #
@@ -15,7 +15,7 @@ name: Collect outbox proposals from consumers
 # 役目を終えたトゥームストーン（全 consumer から対象ファイルが消えた行）を自動で刈る。
 #
 # トリガーは cron ポーリング＋手動。以前は consumer からの repository_dispatch（即時）
-# だったが、そのために各 consumer へ ai-ops に Contents:RW できる PAT を置く必要があり、
+# だったが、そのために各 consumer へ ops-sync に Contents:RW できる PAT を置く必要があり、
 # 「どの consumer からでもルールの正本に書ける」トークンが増殖していた。ルール訂正に
 # 即時性は不要なので、consumer 側のトークン・workflow を全廃してポーリングに戻した。
 # 急ぐときは workflow_dispatch で手動起動する。
@@ -33,13 +33,13 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     steps:
-      # consumer の clone を ai-ops のチェックアウト内に置くと、取り込み PR 作成時の
-      # git add -A が nested repo を gitlink として拾ってしまう。ai-ops と consumers を
+      # consumer の clone を ops-sync のチェックアウト内に置くと、取り込み PR 作成時の
+      # git add -A が nested repo を gitlink として拾ってしまう。ops-sync と consumers を
       # workspace 直下の兄弟ディレクトリに分離する。
-      - name: Checkout ai-ops
+      - name: Checkout ops-sync
         uses: actions/checkout@v5
         with:
-          path: ai-ops
+          path: ops-sync
 
       - name: Set up log directory
         run: |
@@ -60,14 +60,14 @@ jobs:
           while read -r repo; do
             mkdir -p "consumers/${repo%/*}"
             git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${repo}.git" "consumers/${repo}"
-          done < <(grep -vE '^[[:space:]]*(#|$)' ai-ops/consumers.txt)
+          done < <(grep -vE '^[[:space:]]*(#|$)' ops-sync/consumers.txt)
 
       - id: collect
         name: Apply proposals (one consumer per run)
         env:
           PR_BODY_PATH: ${{ runner.temp }}/pr-body.md
           CLEANUP_BODY_PATH: ${{ runner.temp }}/cleanup-body.md
-        run: node ai-ops/scripts/collect-outbox.mjs ai-ops/AGENTS_COMMON.md consumers ai-ops 2>&1 | tee /tmp/ci-logs/collect-outbox.log
+        run: node ops-sync/scripts/collect-outbox.mjs ops-sync/AGENTS_COMMON.md consumers ops-sync 2>&1 | tee /tmp/ci-logs/collect-outbox.log
 
       - name: Record collect result
         if: always()
@@ -79,11 +79,11 @@ jobs:
           echo "- Applied/Rejected/Deferred: ${{ steps.collect.outputs.applied }}/${{ steps.collect.outputs.rejected }}/${{ steps.collect.outputs.deferred }}" >> /tmp/ci-logs/summary.md
           echo "- Finished: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> /tmp/ci-logs/summary.md
 
-      - name: Open intake PR to ai-ops
+      - name: Open intake PR to ops-sync
         if: steps.collect.outputs.found == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
-          path: ai-ops
+          path: ops-sync
           token: ${{ secrets.OPS_SYNC_TOKEN }}
           base: main
           branch: ${{ steps.collect.outputs.branch }}
@@ -101,29 +101,29 @@ jobs:
           base: main
           branch: ${{ steps.collect.outputs.cleanup_branch }}
           delete-branch: true
-          commit-message: 'chore: ai-ops が処理した提案を outbox から整理'
+          commit-message: 'chore: ops-sync が処理した提案を outbox から整理'
           title: ${{ steps.collect.outputs.cleanup_title }}
           body-path: ${{ runner.temp }}/cleanup-body.md
 
       # ── 保守バッチ: 役目を終えたトゥームストーンの掃除 ─────────────────────────
-      # 上の collect が ai-ops チェックアウトを取り込み PR 用に書き換えるため、
+      # 上の collect が ops-sync チェックアウトを取り込み PR 用に書き換えるため、
       # 掃除は別チェックアウトで行い、独立した PR にする（機械的削除なので自動マージ）。
-      - name: Checkout ai-ops (tombstone prune)
+      - name: Checkout ops-sync (tombstone prune)
         uses: actions/checkout@v5
         with:
-          path: ai-ops-prune
+          path: ops-sync-prune
 
       - name: Prune completed tombstones from sync-deletions.txt
-        run: node ai-ops/scripts/prune-tombstones.mjs ai-ops-prune consumers 2>&1 | tee /tmp/ci-logs/prune-tombstones.log
+        run: node ops-sync/scripts/prune-tombstones.mjs ops-sync-prune consumers 2>&1 | tee /tmp/ci-logs/prune-tombstones.log
 
       - name: Open tombstone prune PR
         id: prune-pr
         uses: peter-evans/create-pull-request@v8
         with:
-          path: ai-ops-prune
+          path: ops-sync-prune
           token: ${{ secrets.OPS_SYNC_TOKEN }}
           base: main
-          branch: ai-ops/prune-tombstones
+          branch: ops-sync/prune-tombstones
           delete-branch: true
           commit-message: 'chore: 全 consumer で削除済みのトゥームストーンを整理'
           title: 'chore: sync-deletions.txt の役目を終えた行を整理'
@@ -141,7 +141,7 @@ jobs:
 
       - name: Publish CI logs
         if: always()
-        uses: ./ai-ops/.github/actions/publish-ci-logs
+        uses: ./ops-sync/.github/actions/publish-ci-logs
         with:
           source-dir: /tmp/ci-logs
           dest: collect-outbox/latest

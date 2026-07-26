@@ -78,7 +78,7 @@
 **SKILL.md に手順本体を書かない**（正本は常に `docs/` 側。二重管理にしない）。配布物なので手編集しない
 （直したいときは outbox 提案）。
 
-`.claude/skills/` 以外の4パスは、ai-ops の配布スクリプトが正本 `.claude/skills/` から**配布時に
+`.claude/skills/` 以外の4パスは、ops-sync の配布スクリプトが正本 `.claude/skills/` から**配布時に
 自動生成**する。共通 SOP に skill ラッパーを添えるときに書く（提案する）のは
 `shared/.claude/skills/<name>/SKILL.md` の1ファイルだけ（ミラーを手で作らない。MUST NOT）。
 
