@@ -93,6 +93,7 @@ consumer へ伝播する（追加しかできない実装だと撤去がドリ�
 | `scripts/archive-task-history.mjs` | （保守）`docs/history-inbox/` のフラグメントを `docs/AI_TASK_HISTORY.md` へ統合し、保持量超過分を `docs/history-archive/` へ移す |
 | `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ai-ops＋全 consumer を巡回し、未統合フラグメントか超過エントリがあれば統合＋アーカイブ PR を生成・マージ |
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer から対象が消えた）を刈る |
+| `shared/.github/actions/publish-ephemeral/` | （下り・ファイル）揮発ブランチへの publish。毎回 orphan 1コミットへ書き換え＋TTL 失効＋`--force-with-lease`。恒久ログ用の `publish-ci-logs` と対（下記「揮発する出力と恒久ログを分ける」） |
 
 consumer 側に必要な配線は**無い**（workflow・Secret とも不要）。consumer を増やすときは
 `consumers.txt` への追記と `OPS_SYNC_TOKEN`（PAT）のアクセス対象追加だけ。
@@ -241,6 +242,33 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 > 設計だった（consumer が1つ侵害されると全リポジトリへルールを注入できる増幅経路）。ルール訂正に
 > 即時性は不要なので cron ポーリングに変更し、consumer 側のトークン・workflow を全廃した。
 > ai-ops の main にはブランチ保護を掛けておくこと（PAT による直 push の防止）。
+
+## 揮発する出力と恒久ログを分ける
+
+CI が生む出力には性質の違う2種類があり、**同じブランチに混ぜると片方の要求を満たせなくなる**ので分けている。
+
+- **恒久ログ**（CI ログ・quota 信号）→ `ci-logs` ブランチ／`publish-ci-logs`。追記型で、現在値を読ませ続ける。
+- **読んだら用済みの一次データ**（net-fetch の取得結果）→ 専用の揮発ブランチ（`net-fetch-results`）／
+  `publish-ephemeral`。毎回 orphan 1コミットへ書き換えるので**履歴に堆積せず**、TTL（既定3日）で失効する。
+
+分けた理由は、**git ブランチでは削除が削除にならない**こと。`ci-logs` からファイルを消しても内容は履歴に
+残り、ai-ops は public なので取得結果が世界公開の恒久記録として積み上がる。かといって `ci-logs` ごと
+orphan 再構築すると quota 信号や archive ログの経緯まで巻き込む。**性質で置き場を分けるのが唯一の解**で、
+分けてあれば揮発側はブランチごと捨てられる。
+
+**出口をブランチ以外にはできない**（重要・再検討しないこと）。artifact は `retention-days` で自動失効する
+ので一見最適だが、artifact と run ログの zip はダウンロード URL が `results-receiver.actions.githubusercontent.com`
+や blob ホストへ 302 し、**egress 制限下のエージェント実行環境はこれらを拒否する**（実測: CONNECT に 403・
+到達不可）。`gh run download` も REST も同じホストに当たるので、artifact 化すると全エージェントで結果を
+読み戻せなくなる。egress 制限下で確実に届くのは **git（`git fetch`）と `api.github.com`** だけ。
+そのため出口は「揮発ブランチ」と「ジョブログ」の2つにし、**揮発は artifact ではなく TTL とブランチ
+書き換えで実現している**。ジョブログ側は、ログ本文を取得できるランタイム（GitHub の MCP ツール等）が
+ブランチを取得せず1回で読めるようにするための併設で、**手順上はどちらも同格の「満たし方」**
+（ツールの有無で手順を分岐させない。→ `docs/sop-format.md`）。
+
+`publish-ephemeral` は `publish-ci-logs` を拡張せず別 action にしてある。挙動が大きく違ううえ
+（追記型 vs 毎回書き換え）、`publish-ci-logs` は consumer の deploy 系が依存する敏感な経路だから
+（AGENTS_COMMON「敏感なコードの共通化は挙動を変えない形に留める」）。
 
 ## 前提・限界
 
