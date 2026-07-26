@@ -13,6 +13,10 @@ slice 単位で publish する。このための composite action `.github/actio
 
 - **公開先**: 実行したリポジトリの `ci-logs` ブランチ。private リポジトリのものは非公開、public
   リポジトリ（ai-ops 等）のものは**世界公開**になる——後者に機微を出さない（MUST NOT）。
+- **`ci-logs` は恒久ログ専用**。追記型なので**ファイルを消しても内容は git 履歴に残る**（public
+  リポジトリでは削除が削除にならない）。よって「現在値を読ませ続けるもの」（CI ログ・quota 信号）だけを
+  置き、**読んだら用済みの一次データを混ぜない**（MUST NOT）。後者は専用の揮発ブランチへ出す
+  （例: net-fetch の結果 → `net-fetch-results`。`publish-ci-logs` ではなく `publish-ephemeral` を使う）。
 - **2層構成**（使い分けは全リポジトリ共通）:
   - **inline publish**（手順A-3）… 各ワークフローが**毎 run 常時**、自前の要約ログを公開する。
   - **フル生ログ collector**（手順A-4）… `workflow_run` で完了 run の生ログ全体を集約する別ワークフロー。
@@ -39,12 +43,12 @@ slice 単位で publish する。このための composite action `.github/actio
    1つ完了するごとに最低1分課金されるランナーを成功 run でも起動するのは空費（過去に GitHub Actions 分の
    逼迫を招いた実例あり）。collector を**新規に作る**場合も同じ失敗ゲートを付ける（MUST）。
    - 完了条件: 成功 run で collector が起動しないこと（Skipped になる）を1回確認できている。
-   - **登録の例外**: **リクエスト単位で毎 run の一次情報を inline publish** するワークフロー
-     （現状 `net-fetch`。結果を `net-fetch/<request_id>/` に `if: always()` で常時公開）は collector に
-     **登録しない**。理由: (1) status/response の一次情報は inline に常時残る、(2) job 失敗は主に「取得先が
-     到達不能」等の**期待される失敗**でインフラバグではなく、失敗ゲートの collector を毎回起こすのはノイズ・
-     課金（2026-07-18 の分逼迫と同種）。この例外に当たるかは「毎 run 自前で一次情報を inline publish し、
-     失敗が想定内か」で判断する。
+   - **登録の例外**: **リクエスト単位で毎 run の一次情報を自前で publish** するワークフロー
+     （現状 `net-fetch`。結果を専用の揮発ブランチ `net-fetch-results` の `net-fetch/<request_id>/` と
+     ジョブログへ `if: always()` で常時出す）は collector に**登録しない**。理由: (1) status/response の
+     一次情報は毎 run 自前で出ている、(2) job 失敗は主に「取得先が到達不能」等の**期待される失敗**で
+     インフラバグではなく、失敗ゲートの collector を毎回起こすのはノイズ・課金（2026-07-18 の分逼迫と
+     同種）。この例外に当たるかは「毎 run 自前で一次情報を出しており、失敗が想定内か」で判断する。
 5. リポジトリにログ設計ドキュメントがあるなら、その slice 一覧テーブルに行を足す（collector 由来の
    スライスは「失敗/タイムアウトした run のみ」と明記する）。
    - 完了条件: 手順1〜5 が同一 PR に入っている。

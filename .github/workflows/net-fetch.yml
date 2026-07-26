@@ -2,16 +2,23 @@ name: Net fetch
 
 # AI エージェントの代理で「許可ドメインだけ」を公開取得するリレー（クリーンルーム実行）。
 # エージェントは egress 制限下でも GitHub には到達できるので、この workflow を workflow_dispatch で
-# 起動し、結果を ci-logs ブランチの net-fetch/<request_id>/ スライスから読み戻す。手順は docs/net-fetch.md。
+# 起動し、結果を読み戻す。手順は docs/net-fetch.md。
 #
 # 集約(=public な ai-ops 上で実行し無料枠で回す)と分散(=各 private repo 上で実行し結果を非公開に保つ)の
 # 両モードで同じこの workflow を使う（正本は shared/、ai-ops 自身にも同一コピーを置く。どちらのリポジトリで
 # 起動するかがモードの違い）。将来の枠連動ルーティング（quota-gate）は「どちらで起動するか」を自動で選ぶ層で、
 # この workflow 自体は変更不要。
 #
+# 結果の出口は2つあり、どちらも同じ内容を指す（どちらで読むかは実行するエージェントのランタイム次第）:
+#   1. 結果ブランチ net-fetch-results の net-fetch/<request_id>/ スライス
+#      （publish-ephemeral が毎回 orphan 1コミットに書き換える＝履歴に堆積せず TTL で失効する）
+#   2. ジョブログに直接出した meta と応答本文（ログ本文を取得できる手段があれば1回で読める）
+# ci-logs へは publish しない。net-fetch の結果は「読んだら用済みの一次データ」で、恒久ログの ci-logs に
+# 混ぜると public リポジトリでは削除しても git 履歴に永久に残るため（→ docs/ci-logs.md）。
+#
 # secret は一切このジョブに渡さない（allowlist・SSRF ガード・secret スキャンは net-fetch.sh が enforce）。
-# 唯一使うトークンは結果を ci-logs へ push する publish-ci-logs 用の github.token で、取得ステップの env には
-# 載せない（クリーンルームに認証情報を持ち込ませない）。
+# 唯一使うトークンは結果を結果ブランチへ push する publish-ephemeral 用の github.token で、取得ステップの
+# env には載せない（クリーンルームに認証情報を持ち込ませない）。
 
 on:
   workflow_dispatch:
@@ -21,7 +28,7 @@ on:
         type: string
         required: true
       request_id:
-        description: '相関 ID（[A-Za-z0-9._-]+）。結果は ci-logs の net-fetch/<request_id>/ に出る'
+        description: '相関 ID（[A-Za-z0-9._-]+）。結果は net-fetch-results の net-fetch/<request_id>/ に出る'
         type: string
         required: true
       method:
@@ -37,16 +44,29 @@ on:
         description: '取得タイムアウト秒'
         type: string
         default: '30'
+      inline_max_bytes:
+        description: 'ジョブログに直接出す応答本文の上限バイト（超過分は結果ブランチのスライスにのみ入る）'
+        type: string
+        default: '262144'
+  # 休眠中に最後の結果が残り続けないための掃除。取得のたびに TTL 失効も走るので、これは
+  # 「しばらく net-fetch を使わなかった」ケースだけを拾う（週1・数十秒。private consumer の月枠を食わない）。
+  schedule:
+    - cron: '17 4 * * 0'
 
 permissions:
-  contents: write        # publish-ci-logs が ci-logs ブランチへ結果を push するのに必要
+  contents: write        # publish-ephemeral が結果ブランチへ push するのに必要
 
 concurrency:
   group: net-fetch-${{ github.event.inputs.request_id }}
   cancel-in-progress: false
 
+env:
+  RESULT_BRANCH: net-fetch-results
+  RESULT_RETENTION_DAYS: '3'
+
 jobs:
   fetch:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -82,19 +102,77 @@ jobs:
             printf -- '- request_id: `%s`\n' "$REQUEST_ID"
             printf -- '- url: `%s`\n' "$safe_url"
             printf -- '- status: **%s** (http %s)\n' "$STATUS" "$HTTP_STATUS"
-            printf -- '- result slice: `%s/` on the `ci-logs` branch\n' "$DEST"
+            printf -- '- result slice: `%s/` on the `%s` branch\n' "$DEST" "$RESULT_BRANCH"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # 結果（status/meta/response）を ci-logs ブランチの per-request スライスへ publish する。
-      # これがエージェントの読み戻し口であり、同時に CI ログ（docs/ci-logs.md）の inline publish も兼ねる。
-      - name: Publish result to ci-logs branch
+      # 結果（status/meta/response）を結果ブランチの per-request スライスへ publish する。
+      # publish-ci-logs ではなく publish-ephemeral を使う＝毎回 orphan 1コミットに書き換えるので、
+      # 取得内容が git 履歴に堆積しない（public リポジトリでは履歴＝世界公開の恒久記録になるため）。
+      - name: Publish result to the ephemeral result branch
         # dest が空（＝スクリプトが GITHUB_OUTPUT を書く前に異常終了）のときは publish しない。
-        # 空 dest を publish-ci-logs に渡すと clone を丸ごと消しかねないため。
         if: always() && steps.fetch.outputs.dest != ''
-        uses: ./.github/actions/publish-ci-logs
+        uses: ./.github/actions/publish-ephemeral
         with:
           source-dir: net-fetch-out
           # 生入力ではなく、スクリプトが検証・サニタイズした dest を使う（path traversal 防止）。
           dest: ${{ steps.fetch.outputs.dest }}
-          commit-message: "ci(net-fetch): ${{ steps.fetch.outputs.dest }} (${{ steps.fetch.outputs.status }})"
+          branch: ${{ env.RESULT_BRANCH }}
+          retention-days: ${{ env.RESULT_RETENTION_DAYS }}
+          commit-message: "net-fetch: ${{ steps.fetch.outputs.dest }} (${{ steps.fetch.outputs.status }})"
+          token: ${{ github.token }}
+
+      # 同じ結果をジョブログにも出す。ログ本文を取得できる手段を持つランタイムは、結果ブランチを
+      # fetch せずここから1回で読み戻せる（どちらの出口も内容は同じ。→ docs/net-fetch.md の手順5）。
+      # 末尾ステップに置いてあるのは、ログ末尾から N 行だけ取る読み方でも本文に届くようにするため。
+      - name: Echo result to job log
+        if: always() && steps.fetch.outputs.result_dir != ''
+        env:
+          RESULT_DIR: ${{ steps.fetch.outputs.result_dir }}
+          INLINE_MAX_BYTES: ${{ inputs.inline_max_bytes }}
+        run: |
+          set -uo pipefail
+          cap="$INLINE_MAX_BYTES"
+          case "$cap" in ''|*[!0-9]*) cap=262144 ;; esac
+          [ "$cap" -gt 0 ] || cap=262144
+
+          # 取得した外部コンテンツをそのままログに流すと、本文中の `::error::` 等が workflow command
+          # として解釈される（ログ経由のコマンド注入）。stop-commands で解釈を止めてから出し、同じ
+          # トークンで再開する。トークンは本文側から推測できると止め損なうのでランダムにする。
+          guard="nf-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          echo "::stop-commands::${guard}"
+
+          echo "===== NET-FETCH META BEGIN ====="
+          cat "$RESULT_DIR/meta.txt" 2>/dev/null || echo "(meta.txt missing)"
+          echo "===== NET-FETCH META END ====="
+
+          if [ -f "$RESULT_DIR/response.txt" ]; then
+            size="$(wc -c < "$RESULT_DIR/response.txt" | tr -d ' ')"
+            echo "===== NET-FETCH RESPONSE BEGIN (bytes=${size}) ====="
+            head -c "$cap" "$RESULT_DIR/response.txt"
+            echo
+            if [ "$size" -gt "$cap" ]; then
+              echo "[truncated at ${cap} bytes; the full body is only in the result branch slice]"
+            fi
+            echo "===== NET-FETCH RESPONSE END ====="
+          else
+            echo "(no response body: status is not ok, or method was HEAD)"
+          fi
+
+          echo "::${guard}::"
+
+  # 休眠中の掃除専用。取得はせず、TTL を過ぎたスライスを落とすだけ。
+  sweep:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Expire old result slices
+        uses: ./.github/actions/publish-ephemeral
+        with:
+          prune-only: 'true'
+          branch: ${{ env.RESULT_BRANCH }}
+          retention-days: ${{ env.RESULT_RETENTION_DAYS }}
+          commit-message: "net-fetch: expire result slices older than ${{ env.RESULT_RETENTION_DAYS }}d"
           token: ${{ github.token }}
