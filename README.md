@@ -72,6 +72,9 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 - **ops-runner に secret を置かない**（`github.token` のみ）。これが分離の目的そのもの。
 - 集約モードの dispatch 先・結果の読み戻し先はどちらも ops-runner。ただし **allowlist の正本は ops-sync の
   `shared/.github/net-allowlist.txt`**、**Actions 月枠の信号は ops-sync の `ci-logs`** で、これらは移っていない。
+- net-fetch の揮発結果は `publish-ephemeral` が既定3日で掃除する。`slice-root` 直下で `.published-at` が無い・
+  読めないスライスも安全側に削除し、最後のスライスが失効した場合は空 tree を publish するため、marker の
+  欠落や空ブランチ化を理由に古い結果が残り続けることはない。
 
 ## セットアップ（1回だけ）
 
