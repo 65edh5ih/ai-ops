@@ -125,9 +125,12 @@ jobs:
       # fetch せずここから1回で読み戻せる（どちらの出口も内容は同じ。→ docs/net-fetch.md の手順5）。
       # 末尾ステップに置いてあるのは、ログ末尾から N 行だけ取る読み方でも本文に届くようにするため。
       - name: Echo result to job log
-        if: always() && steps.fetch.outputs.result_dir != ''
+        # 参照するのは composite action が宣言した出力名（`result-dir`）。net-fetch.sh が
+        # GITHUB_OUTPUT に書く生のキー（`result_dir`）ではない——後者を書くと常に空になり、
+        # この if が偽になってジョブログ出力が毎 run 黙ってスキップされる。
+        if: always() && steps.fetch.outputs.result-dir != ''
         env:
-          RESULT_DIR: ${{ steps.fetch.outputs.result_dir }}
+          RESULT_DIR: ${{ steps.fetch.outputs.result-dir }}
           INLINE_MAX_BYTES: ${{ inputs.inline_max_bytes }}
         run: |
           set -uo pipefail
