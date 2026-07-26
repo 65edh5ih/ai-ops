@@ -16,9 +16,10 @@ name: Codex review inbox
 #   - **全体一覧** … 全リポジトリ分をリポジトリごとにグループ化し、セッションに貼るコピペ用の依頼文を
 #     添える。全リポジトリの内容が混ざるので **private リポジトリにだけ**置く（ops-sync は世界公開なので
 #     ここには置けない。MUST NOT）。人がトリアージに使う。
-#   - **リポジトリごとのスライス** … 各リポジトリの `.ops-sync/codex-review-inbox.md` に自分の分だけ。
+#   - **リポジトリごとのスライス** … private consumer の `.ops-sync/codex-review-inbox.md` に自分の分だけ。
 #     どのエージェントでも自分の作業リポジトリで読める（issue は GitHub API アクセスが要る＝ランタイム
-#     依存になるので使わない。`.ops-sync/tasks/` と同じ「物理的に届ける」作法）。
+#     依存になるので使わない。`.ops-sync/tasks/` と同じ「物理的に届ける」作法）。public の ops-sync / ops-runner
+#     は main を PR 必須で保護するため直接 push せず、private の全体一覧だけに載せる。
 #
 # fork PR から secret に触れさせないため、トリガは schedule と workflow_dispatch だけにする
 # （pull_request 系のトリガを足さないこと）。
@@ -62,7 +63,8 @@ jobs:
         with:
           path: ops-sync
 
-      # 走査対象＝スライスの書き込み先。full clone は不要（main の先端にだけ書く）。
+      # 走査対象を clone し、そのうち private consumer だけをスライスの書き込み先にする。
+      # full clone は不要（main の先端にだけ書く）。
       # **どのリポジトリも `.ops-sync/` へのパスは push トリガの paths に入っていない**ことを前提にしている
       # （入れると毎時 CI が起動して Actions 枠を焼く。consumer に workflow を足すときは確認する）。
       - name: Clone target repos
@@ -75,6 +77,10 @@ jobs:
           { cat ops-sync/consumers.txt; printf '\n%s\n' "$REPO_SELF"; } \
             | sed -E 's/#.*$//' | tr -s '[:space:]' '\n' | grep -E '^[^/]+/[^/]+$' | sort -u \
             > /tmp/target-repos.txt
+          # public repo は main を PR 必須の ruleset で保護する。毎時の在庫更新のために bypass を与えたり
+          # PR を量産したりせず、走査と private の全体一覧への掲載だけ行う。
+          grep -Ev '^(65edh5ih/ops-sync|65edh5ih/ops-runner)$' /tmp/target-repos.txt \
+            > /tmp/slice-repos.txt
           while read -r repo; do
             mkdir -p "clones/${repo%/*}"
             git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${repo}.git" "clones/${repo}"
@@ -98,6 +104,7 @@ jobs:
           set -uo pipefail
           mkdir -p logs/ci/scripts
           CRI_REPOS="$(cat /tmp/target-repos.txt)" \
+            CRI_SLICE_REPOS="$(cat /tmp/slice-repos.txt)" \
             node ops-sync/scripts/codex-review-inbox.mjs 2>&1 | tee logs/ci/scripts/codex-review-inbox.log
 
       - name: Commit and push changed inventories
@@ -116,7 +123,7 @@ jobs:
           while read -r repo; do
             mkdir -p "$stage/${repo}"
             cp -a "clones/${repo}/.ops-sync" "$stage/${repo}/" 2>/dev/null || true
-          done < /tmp/target-repos.txt
+          done < /tmp/slice-repos.txt
 
           while read -r repo; do
             d="clones/${repo}"
@@ -141,7 +148,7 @@ jobs:
               echo "::warning::codex-inbox: failed to push ${repo} after retries"
               rc=1
             fi
-          done < /tmp/target-repos.txt
+          done < /tmp/slice-repos.txt
           exit "$rc"
 
       - name: Summarize
@@ -159,7 +166,7 @@ jobs:
             printf -- '- unreadable repos: %s\n' "${FAILURES:-?}"
             printf -- '- files rewritten: %s\n' "${CHANGED:-?}"
             printf -- '- aggregate: `%s` in `%s`\n' "$INBOX_ALL_PATH" "$INBOX_ALL_REPO"
-            printf -- '- per-repo slice: `%s` in each target repo\n' "$SLICE_PATH"
+            printf -- '- per-repo slice: `%s` in private target repos (public repos are aggregate-only)\n' "$SLICE_PATH"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # docs/ci-logs.md 手順A-3（成功・失敗を問わず常時）。
