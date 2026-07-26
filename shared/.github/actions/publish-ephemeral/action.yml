@@ -129,11 +129,23 @@ runs:
           # Single orphan commit: the branch never carries history of past results.
           git -C "$tmp" checkout --orphan __publish >/dev/null 2>&1 || return 1
           git -C "$tmp" add -A
-          if git -C "$tmp" diff --cached --quiet && [ -n "$base" ]; then
-            echo "publish-ephemeral: nothing to change on '$BRANCH'."
-            return 0
+
+          # Decide "did anything change?" by comparing the rebuilt tree to the tree we started
+          # from -- NOT with `git diff --cached`. On an unborn orphan branch that diffs the index
+          # against the *empty* tree, so a sweep that expires the last remaining slice looks like
+          # "no changes" and returns without pushing, leaving that slice on the branch forever
+          # (the TTL sweep could never empty the branch). Comparing trees makes emptying the
+          # branch a real change, and --allow-empty lets the resulting empty commit be created.
+          local new_tree old_tree
+          new_tree="$(git -C "$tmp" write-tree)" || return 1
+          if [ -n "$base" ]; then
+            old_tree="$(git -C "$tmp" rev-parse "${base}^{tree}" 2>/dev/null || true)"
+            if [ -n "$old_tree" ] && [ "$new_tree" = "$old_tree" ]; then
+              echo "publish-ephemeral: nothing to change on '$BRANCH'."
+              return 0
+            fi
           fi
-          git -C "$tmp" commit -q -m "$MSG" || return 1
+          git -C "$tmp" commit -q --allow-empty -m "$MSG" || return 1
 
           if [ -n "$base" ]; then
             git -C "$tmp" push --force-with-lease="${BRANCH}:${base}" origin "HEAD:${BRANCH}" 2>/dev/null
