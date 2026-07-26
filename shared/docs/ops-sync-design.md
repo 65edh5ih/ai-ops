@@ -36,7 +36,7 @@
 | consumer の `.ops-sync/outbox/*.md` | その consumer のエージェント |
 | 各リポジトリの `docs/history-inbox/<...>.md`（履歴フラグメント） | 新規1ファイル＝そのリポジトリのエージェント（既存ファイルには触れない） |
 | 各リポジトリの `docs/AI_TASK_HISTORY.md` | inbox の統合・アーカイブ移動とも ops-sync の archive CI（下記・保守バッチ）。エージェントは直接編集しない |
-| 一覧ホストの `.ops-sync/codex-review-inbox.md` | ops-sync の codex-review-inbox CI（下記「Codex レビューの取りこぼし対策」）。人もエージェントも編集しない |
+| 各リポジトリの `.ops-sync/codex-review-inbox.md`／private の `.ops-sync/codex-review-inbox-all.md` | ops-sync の codex-review-inbox CI（下記「Codex レビューの取りこぼし対策」）。人もエージェントも編集しない |
 
 ## 配布物の三層＋タスク
 
@@ -96,8 +96,8 @@ consumer へ伝播する（追加しかできない実装だと撤去がドリ�
 | `scripts/archive-task-history.mjs` | （保守）`docs/history-inbox/` のフラグメントを `docs/AI_TASK_HISTORY.md` へ統合し、保持量超過分を `docs/history-archive/` へ移す |
 | `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ops-sync＋全 consumer を巡回し、未統合フラグメントか超過エントリがあれば統合＋アーカイブ PR を生成・マージ |
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer から対象が消えた）を刈る |
-| `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から**未 resolve の Codex レビュースレッド**を集め、1本の markdown 一覧に落とす |
-| `.github/workflows/codex-review-inbox.yml` | （信号）cron（15分ごと）＋手動で上記を実行し、一覧を**private リポジトリ**の `.ops-sync/codex-review-inbox.md` へ直接 push（内容に変化があるときだけ） |
+| `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から**未 resolve の Codex レビュースレッド**を集め、全体一覧＋リポジトリごとのスライスに落とす |
+| `.github/workflows/codex-review-inbox.yml` | （信号）cron（15分ごと）＋手動で上記を実行し、全体一覧を private の `.ops-sync/codex-review-inbox-all.md`、各リポジトリの自分の分を `.ops-sync/codex-review-inbox.md` へ直接 push（内容に変化があるときだけ） |
 | `shared/.github/actions/publish-ephemeral/` | （下り・ファイル）揮発ブランチへの publish。毎回 orphan 1コミットへ書き換え＋TTL 失効＋`--force-with-lease`。恒久ログ用の `publish-ci-logs` と対（下記「揮発する出力と恒久ログを分ける」） |
 
 consumer 側に必要な配線は**無い**（workflow・Secret とも不要）。consumer を増やすときは
@@ -275,10 +275,20 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 - **15分ごとに回せるのは ops-sync が public だから**（GitHub-hosted runner が無料＝アカウントの Actions 枠を
   消費しない）。private リポジトリで同じことをすると枠を食う。
 
-**一覧の置き場は private リポジトリ**（`.ops-sync/codex-review-inbox.md`）。理由は2つ:
+**出力は2つ**（実行は public、成果物の可視性は置き場で分ける）:
 
-- ops-sync は世界公開なので、private リポジトリのレビュー内容をここに置けない（実行は public・成果物は
-  private に分ける）。この workflow が ops-sync の `ci-logs`（公開）に出すログは**件数と repo 名だけ**にする。
+- **全体一覧** `.ops-sync/codex-review-inbox-all.md` … **private リポジトリにだけ**置く。全リポジトリ分を
+  **リポジトリごとにグループ化**し、各グループにそのリポジトリのセッションへ貼るコピペ用の依頼文を添える
+  （人のトリアージ用。1本開けば全体が分かり、あとは貼るだけで各リポジトリに振れる）。
+- **リポジトリごとのスライス** `.ops-sync/codex-review-inbox.md` … **各リポジトリに自分の分だけ**。
+  全リポジトリで同じパスなので、共通ブロックの発火トリガを「このリポジトリの `.ops-sync/codex-review-inbox.md`
+  を読め」の1文に固定できる（どのセッションでも自分の積み残しを自力で読める）。
+
+置き場をこう分ける理由は2つ:
+
+- ops-sync は世界公開なので、**全リポジトリ分が混ざる全体一覧をここに置けない**。この workflow が ops-sync の
+  `ci-logs`（公開）に出すログも**件数と repo 名だけ**にする。スライスは各リポジトリ自身の指摘しか含まないので、
+  public な ops-runner・ops-sync に置いても公開範囲は変わらない。
 - **issue ではなくファイル**にするのは、どのエージェントでも能力ゼロで読めるようにするため。issue を読むには
   GitHub API アクセスが要り、エージェントのランタイム依存になる（`.ops-sync/tasks/` と同じ「物理的に届ける」
   作法。→「解決したい問題」）。

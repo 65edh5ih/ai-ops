@@ -52,8 +52,8 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer で削除済み）を自動で刈る |
 | `scripts/actions-quota.mjs` | （信号）billing API で Actions 月枠の使用率を測り、`ok`/`tight`/`exhausted`/`unknown` の粗い state に落とす |
 | `.github/workflows/actions-quota.yml` | （信号）cron（6時間ごと）で上記を実行し `ci-logs` の `quota/actions/actions.json` へ publish。エージェントが private repo で workflow を回してよいかの判断に使う（手順: `shared/docs/actions-quota.md`） |
-| `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から未 resolve の Codex レビュースレッドを集め、1本の一覧に落とす |
-| `.github/workflows/codex-review-inbox.yml` | （信号）cron（15分ごと）＋手動で上記を実行し、一覧を private の `.ops-sync/codex-review-inbox.md` へ push（変化があるときだけ） |
+| `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から未 resolve の Codex レビュースレッドを集め、全体一覧＋リポジトリごとのスライスに落とす |
+| `.github/workflows/codex-review-inbox.yml` | （信号）cron（15分ごと）＋手動で上記を実行し、全体一覧を private の `.ops-sync/codex-review-inbox-all.md`、各リポジトリの自分の分を `.ops-sync/codex-review-inbox.md` へ push（変化があるときだけ） |
 | `scripts/cloudflare-quota.mjs` | （信号）CF の月枠（Pages のビルド回数・Workers Builds の分数）を測り、使用率と**直近レートによる月末予測**の両方で band を出す |
 | `.github/workflows/cloudflare-quota.yml` | （信号）cron（6時間ごと）で上記を実行し `ci-logs` の `quota/cloudflare/cloudflare.json` へ publish。GitHub 枠の逼迫時に「CF へ退避してよいか」の判断に使う |
 
@@ -145,7 +145,9 @@ consumer 側のセットアップは**不要**（workflow・Secret とも置か�
 - **Codex レビューの未対応在庫を見る**: 上の「マージ後の同期 PR を確認する」はセッションが生きている
   間しか効かない（指摘はセッション終了後に届く）。取りこぼしの受け皿として *Codex review inbox*
   workflow（cron 15分ごと＋手動）が全リポジトリの**未 resolve な Codex レビュースレッド**を集め、
-  private リポジトリの **`.ops-sync/codex-review-inbox.md`** に1本の一覧として書き出す。
+  private リポジトリの **`.ops-sync/codex-review-inbox-all.md`**（全リポジトリ分・リポジトリごとに
+  グループ化＋セッションに貼るコピペ用の依頼文つき）と、**各リポジトリの `.ops-sync/codex-review-inbox.md`**
+  （そのリポジトリの分だけ。どのセッションでも自力で読める）に書き出す。
   **一覧に載る＝未対応**で、直してスレッドを resolve すれば次回実行で消える（別途の管理表は無い）。
   メール通知を1件ずつ辿る代わりにこのファイルを見る。新しい secret は不要（`OPS_SYNC_TOKEN` の
   Pull requests 権限で読む）。仕組みと置き場の理由は
