@@ -86,4 +86,5 @@ consumer に影響する変更・ops-sync 内部だけの変更の区別なく�
 > **自動チェック**: `.claude/` の `Stop` フック（`check-history.sh`）が、追跡対象（`AGENTS_COMMON.md`・`shared/`・
 > `tasks/`・`scripts/`・`.github/`・`AGENTS.md`・`.claude/` 等）を変更したセッションで、履歴（`docs/history-inbox/`
 > のフラグメント、または本体 `docs/AI_TASK_HISTORY.md`）に触れず完了しようとすると**完了境界で1度 block して
-> 記録を促す**（`stop_hook_active` で1回だけ block）。ops-sync 固有設定で、consumer へは配布されない。
+> `scripts/new-task-history.mjs <タスクスラッグ> "<短いタイトル>"` の実行を促す**（`stop_hook_active` で1回だけ
+> block）。ops-sync 固有設定で、consumer へは配布されない。
