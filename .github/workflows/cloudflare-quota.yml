@@ -4,12 +4,12 @@ name: Cloudflare quota
 # `quota/cloudflare/cloudflare.json` へ粗い state として公開する。GitHub 枠の逼迫時に「CF へ退避してよいか」を
 # 判断するための、`actions-quota` の対になる信号（手順: scripts/cloudflare-quota.mjs 冒頭）。
 #
-# **ai-ops でだけ動かす**（shared/ に置かず consumer へ配布しない）。理由は actions-quota と同じ:
+# **ops-sync でだけ動かす**（shared/ に置かず consumer へ配布しない）。理由は actions-quota と同じ:
 #   - CF の枠は**アカウント単位**なので測定は1箇所でよい。
-#   - ai-ops は public なので測定自体が GitHub の枠を消費しない。
+#   - ops-sync は public なので測定自体が GitHub の枠を消費しない。
 #   - consumer に CF トークンを配らずに済む。
 #
-# **ここに置くトークンは読み取り専用にする**（MUST NOT: 書き込み権限を持たせる）。ai-ops は public で、
+# **ここに置くトークンは読み取り専用にする**（MUST NOT: 書き込み権限を持たせる）。ops-sync は public で、
 # 切替（Pages の自動デプロイ反転・watch paths 変更）に要る Edit 権限は consumer 側の workflow が
 # 自分のトークンで行う。secret 未設定なら state=unknown を publish して緑で終わる（消費側は unknown を
 # 逼迫と同じ扱いにするので安全側に倒れる）。
@@ -93,7 +93,7 @@ jobs:
             printf -- '- published to: `quota/cloudflare/cloudflare.json` on the `ci-logs` branch\n'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # docs/ci-logs.md 手順A-3。**publish 先（ai-ops の ci-logs）は世界公開なので、万一ログに token 形が
+      # docs/ci-logs.md 手順A-3。**publish 先（ops-sync の ci-logs）は世界公開なので、万一ログに token 形が
       # 混ざっても外に残さない**（スクリプトは token を出力しないが、保険として伏字方針を適用する）。
       - name: Stage CI log snapshot
         if: always()

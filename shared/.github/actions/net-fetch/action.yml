@@ -5,7 +5,7 @@ description: >-
   SSRF to internal/metadata hosts, rejects requests that carry secrets, and
   redacts any secret-looking strings from the response. Rejections do not fail
   the job (the result is always published so the agent can read it); only
-  infrastructure errors fail. Distributed to all consumers from ai-ops.
+  infrastructure errors fail. Distributed to all consumers from ops-sync.
 inputs:
   url:
     description: URL to fetch (https only).

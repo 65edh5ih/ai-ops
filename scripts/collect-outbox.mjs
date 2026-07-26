@@ -1,5 +1,5 @@
-// consumer → ai-ops の「上り」経路。
-// 各 consumer の .ai-ops/outbox/*.md を拾い、種別に応じて処理する:
+// consumer → ops-sync の「上り」経路。
+// 各 consumer の .ops-sync/outbox/*.md を拾い、種別に応じて処理する:
 //   - common-block-edit : AGENTS_COMMON.md を全文置換（ベースハッシュで鮮度を検査）
 //   - shared-file       : shared/<対象パス> にファイルを配置
 //   - task              : tasks/<対象リポジトリ>/ に依頼ファイルを登録（sync で対象へ配布）
@@ -10,12 +10,12 @@
 // 潰し合う提案（2件目以降の common-block-edit・対象パスが重複する shared-file。いずれも全文置換）は
 // 手を付けずに outbox へ残し、次回実行（cleanup PR マージ後）に回す。別 consumer の提案も次回。
 //
-// 不正な提案（種別不明・必須項目の欠落・パス不正・空本文・削除率超過）は、`.ai-ops/outbox/rejected/`
+// 不正な提案（種別不明・必須項目の欠落・パス不正・空本文・削除率超過）は、`.ops-sync/outbox/rejected/`
 // へエラーノート付きで**差し戻す**（cleanup PR に含まれる）。以前は exit 1 で放置していたため、
 // 壊れた提案が最古に居座って後続の全提案を人間の介入まで止めていた。
 //
-// 使い方: node collect-outbox.mjs <AGENTS_COMMON.md path> <consumers checkout root> [<ai-ops root>]
-//   consumers root の構造: <root>/<owner>/<repo>/.ai-ops/outbox/*.md
+// 使い方: node collect-outbox.mjs <AGENTS_COMMON.md path> <consumers checkout root> [<ops-sync root>]
+//   consumers root の構造: <root>/<owner>/<repo>/.ops-sync/outbox/*.md
 //   環境変数 PR_BODY_PATH / CLEANUP_BODY_PATH があれば、取り込み PR / cleanup PR の本文を書き出す。
 import {
   readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync, appendFileSync,
@@ -23,8 +23,8 @@ import {
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
-const COMMON_START = '<!-- AI-OPS:COMMON START';
-const COMMON_END   = '<!-- AI-OPS:COMMON END -->';
+const COMMON_START = '<!-- OPS-SYNC:COMMON START';
+const COMMON_END   = '<!-- OPS-SYNC:COMMON END -->';
 
 // 共通ブロック全文に必須のマーカーが両方あるか
 function hasCommonMarkers(text) {
@@ -88,7 +88,7 @@ const fmtDelta = (n) => `${n >= 0 ? '+' : '-'}${fmtNum(Math.abs(n))}`;
 
 const [, , commonPath, consumersRoot, aiOpsRoot = '.'] = process.argv;
 if (!commonPath || !consumersRoot) {
-  console.error('usage: node collect-outbox.mjs <AGENTS_COMMON.md> <consumers root> [<ai-ops root>]');
+  console.error('usage: node collect-outbox.mjs <AGENTS_COMMON.md> <consumers root> [<ops-sync root>]');
   process.exit(2);
 }
 
@@ -101,11 +101,16 @@ function dirs(p) {
 const proposals = [];
 for (const owner of dirs(consumersRoot)) {
   for (const repo of dirs(path.join(consumersRoot, owner))) {
-    const outbox = path.join(consumersRoot, owner, repo, '.ai-ops', 'outbox');
-    if (!existsSync(outbox)) continue;
-    for (const e of readdirSync(outbox, { withFileTypes: true })) {
-      if (!e.isFile() || !e.name.endsWith('.md')) continue;
-      proposals.push({ repo: `${owner}/${repo}`, file: path.join(outbox, e.name), name: e.name });
+    // 移行期は旧 .ai-ops/outbox も拾う。配布 doc が新パスに切り替わる前に始まったセッションが
+    // 旧パスへ提案を置くことがあり、片方しか見ないと取りこぼして提案が永久に処理されない。
+    // 全 consumer から .ai-ops/ が消えたら、走査を新パスだけに戻してよい。
+    for (const dir of ['.ops-sync', '.ai-ops']) {
+      const outbox = path.join(consumersRoot, owner, repo, dir, 'outbox');
+      if (!existsSync(outbox)) continue;
+      for (const e of readdirSync(outbox, { withFileTypes: true })) {
+        if (!e.isFile() || !e.name.endsWith('.md')) continue;
+        proposals.push({ repo: `${owner}/${repo}`, file: path.join(outbox, e.name), name: e.name, outboxDir: dir });
+      }
     }
   }
 }
@@ -120,7 +125,9 @@ proposals.sort((a, b) => a.name.localeCompare(b.name));
 const consumerRepo = proposals[0].repo;
 const batch = proposals.filter((p) => p.repo === consumerRepo);
 const consumerDir = path.join(consumersRoot, consumerRepo);
-const rejectedDir = path.join(consumerDir, '.ai-ops', 'outbox', 'rejected');
+// 差し戻し先は、その提案が置かれていた outbox と同じディレクトリに合わせる（旧パスの提案を
+// 新パスへ差し戻すと、提案者が自分の置いた場所を見ても見つけられない）。
+const rejectedDir = path.join(consumerDir, batch[0].outboxDir, 'outbox', 'rejected');
 
 const KNOWN = ['common-block-edit', 'shared-file', 'task', 'task-done'];
 const applied = [];   // { name, type, title, section }
@@ -135,10 +142,10 @@ function reject(p, reason, extra) {
   const original = readFileSync(p.file, 'utf8');
   const note = [
     '> [!CAUTION]',
-    `> **ai-ops の collect が差し戻した提案です**（${new Date().toISOString().slice(0, 10)}）。このディレクトリのファイルは処理されません。`,
+    `> **ops-sync の collect が差し戻した提案です**（${new Date().toISOString().slice(0, 10)}）。このディレクトリのファイルは処理されません。`,
     `> 却下理由: ${reason}`,
     extra ? `> ${extra}` : null,
-    '> 修正のうえ、新しいファイル名で `.ai-ops/outbox/` に置き直してください。',
+    '> 修正のうえ、新しいファイル名で `.ops-sync/outbox/` に置き直してください。',
     '',
     '',
   ].filter((l) => l !== null).join('\n');
@@ -194,7 +201,7 @@ for (const p of batch) {
       reject(
         p,
         `削除率 ${breach}% が上限 ${DELETE_RATIO_LIMIT * 100}% を超えています`,
-        '意図的な大幅削減であれば、オーナーに ai-ops 側での手動適用を依頼してください。',
+        '意図的な大幅削減であれば、オーナーに ops-sync 側での手動適用を依頼してください。',
       );
       continue;
     }
@@ -313,7 +320,7 @@ for (const p of batch) {
       title: `chore: ${targetRepo} へのタスクを登録 (${consumerRepo} 発)`,
       section: [
         `\`tasks/${targetRepo}/${p.name}\` を登録します。マージすると sync workflow が`,
-        `\`${targetRepo}\` の \`.ai-ops/tasks/${p.name}\` へ配布します（同期 PR のマージ後、`,
+        `\`${targetRepo}\` の \`.ops-sync/tasks/${p.name}\` へ配布します（同期 PR のマージ後、`,
         'そのリポジトリのセッションが実行します）。',
         reasonLine,
       ].filter(Boolean).join('\n'),
@@ -333,7 +340,7 @@ for (const p of batch) {
     let note;
     if (existsSync(target)) {
       rmSync(target);
-      note = `\`tasks/${consumerRepo}/${fileName}\` を削除します。次回 sync で consumer 側の \`.ai-ops/tasks/\` からも消えます。`;
+      note = `\`tasks/${consumerRepo}/${fileName}\` を削除します。次回 sync で consumer 側の \`.ops-sync/tasks/\` からも消えます。`;
     } else {
       note = `\`tasks/${consumerRepo}/${fileName}\` は既に存在しません（差分なし・outbox の掃除のみ行います）。`;
     }
@@ -361,7 +368,7 @@ const intakeBody = [
   ...applied.map((a) => `### \`${a.name}\`（${a.type}）\n\n${a.section}`),
   '',
   '---',
-  `- 提案元: \`${consumerRepo}\` の \`.ai-ops/outbox/\`（処理済み提案の削除・差し戻しは別途の cleanup PR で行います）`,
+  `- 提案元: \`${consumerRepo}\` の \`.ops-sync/outbox/\`（処理済み提案の削除・差し戻しは別途の cleanup PR で行います）`,
   '- この PR をマージすると、sync workflow が全 consumer へ配布します。',
   '- 内容に問題があれば**マージせず close** してください（提案本文はこの PR の差分に保存されています）。' +
     '提案元 consumer の outbox 掃除 PR も close してください。',
@@ -369,17 +376,17 @@ const intakeBody = [
 
 const cleanupTitle =
   applied.length && rejected.length
-    ? `chore: ai-ops 提案の outbox 整理（取り込み${applied.length}件・差し戻し${rejected.length}件）`
+    ? `chore: ops-sync 提案の outbox 整理（取り込み${applied.length}件・差し戻し${rejected.length}件）`
     : rejected.length
-      ? `chore: 不正な ai-ops 提案を outbox/rejected/ へ差し戻し（${rejected.length}件）`
-      : `chore: 取り込み済みの ai-ops 提案を outbox から削除（${applied.length}件）`;
+      ? `chore: 不正な ops-sync 提案を outbox/rejected/ へ差し戻し（${rejected.length}件）`
+      : `chore: 取り込み済みの ops-sync 提案を outbox から削除（${applied.length}件）`;
 
 const cleanupBody = [
-  'ai-ops の collect workflow が outbox を処理した結果です。',
+  'ops-sync の collect workflow が outbox を処理した結果です。',
   '',
-  applied.length ? '取り込み済み（ai-ops 側に取り込み PR を作成済み。outbox から削除）:' : null,
+  applied.length ? '取り込み済み（ops-sync 側に取り込み PR を作成済み。outbox から削除）:' : null,
   ...applied.map((a) => `- \`${a.name}\``),
-  rejected.length ? '\n差し戻し（不正な提案。`.ai-ops/outbox/rejected/` へ移動。冒頭のエラーノートを読んで、修正のうえ新しいファイル名で置き直してください）:' : null,
+  rejected.length ? '\n差し戻し（不正な提案。`.ops-sync/outbox/rejected/` へ移動。冒頭のエラーノートを読んで、修正のうえ新しいファイル名で置き直してください）:' : null,
   ...rejected.map((r) => `- \`${r.name}\` — ${r.reason}`),
   deferred.length ? '\n未処理（同一実行内で衝突するため次回の collect が処理します。このファイルは outbox に残っています）:' : null,
   ...deferred.map((d) => `- \`${d.name}\``),
@@ -397,8 +404,8 @@ emitOutputs({
   applied: String(applied.length),
   rejected: String(rejected.length),
   deferred: String(deferred.length),
-  branch: `ai-ops/intake-${slug}`,
-  cleanup_branch: `ai-ops/cleanup-${slug}`,
+  branch: `ops-sync/intake-${slug}`,
+  cleanup_branch: `ops-sync/cleanup-${slug}`,
   pr_title: prTitle,
   cleanup_title: cleanupTitle,
 });

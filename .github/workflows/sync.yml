@@ -5,14 +5,14 @@ name: Sync common rules to consumers
 #
 # あわせて cron（1日1回）でも全 consumer へ再適用する（ドリフトの自己修復）。
 # push 起点だけだと、consumer 側でマーカー区間や配布ファイルが手編集された場合に
-# 「次に ai-ops を変更するまで」ドリフトが残り続ける（エージェントが古い/改変された
+# 「次に ops-sync を変更するまで」ドリフトが残り続ける（エージェントが古い/改変された
 # ルールを読んで従ってしまう）。適用スクリプトは冪等で、差分が無ければ PR は立たない。
 # 既定の GITHUB_TOKEN は他リポジトリに書けないため、複数リポジトリ権限の PAT を
 # Secret OPS_SYNC_TOKEN（Contents: RW / Pull requests: RW / Workflows: RW）で渡すこと。
 # Workflows: RW は shared/.github/workflows/（例 branch-cleanup.yml）を consumer へ配布するために必須
 # （GitHub は .github/workflows/ 配下を Workflows 権限の無い PAT で push させない）。
 #
-# MERGE_MODE — 同期PRの扱い（内容は ai-ops の main マージ時点でレビュー済みなので、
+# MERGE_MODE — 同期PRの扱い（内容は ops-sync の main マージ時点でレビュー済みなので、
 # consumer 側での再レビューは原則不要という設計）:
 #   direct : 生成後に即マージする（完全自動。consumer main に直結する）
 #   auto   : GitHub の auto-merge を有効化する（consumer 側に branch protection＋
@@ -61,7 +61,7 @@ jobs:
       matrix:
         consumer: ${{ fromJson(needs.prepare.outputs.consumers) }}
     steps:
-      - name: Checkout ai-ops (source of truth)
+      - name: Checkout ops-sync (source of truth)
         uses: actions/checkout@v5
 
       - name: Checkout consumer
@@ -98,22 +98,22 @@ jobs:
           token: ${{ secrets.OPS_SYNC_TOKEN }}
           path: consumer
           base: main
-          branch: ai-ops/sync-common
+          branch: ops-sync/sync-common
           delete-branch: true
-          commit-message: 'chore: sync common rules from ai-ops'
-          title: 'chore: ai-ops 共通ルールを同期'
+          commit-message: 'chore: sync common rules from ops-sync'
+          title: 'chore: ops-sync 共通ルールを同期'
           body: |
-            ai-ops（単一の正）に追従して、次を更新します:
+            ops-sync（単一の正）に追従して、次を更新します:
 
-            - `AGENTS.md` の共通ブロック（`<!-- AI-OPS:COMMON START -->` 〜 `END`）
+            - `AGENTS.md` の共通ブロック（`<!-- OPS-SYNC:COMMON START -->` 〜 `END`）
             - `CLAUDE.md` / `GEMINI.md` → `AGENTS.md` の入口 symlink（各エージェントに AGENTS.md を読ませる）
             - `shared/` 由来の配布ファイル（`docs/` の共通 doc・composite action 等）
-            - このリポジトリ宛のタスク（`.ai-ops/tasks/`）
-            - 撤去されたファイルの削除（`.ai-ops/sync-manifest.txt` 基準）
+            - このリポジトリ宛のタスク（`.ops-sync/tasks/`）
+            - 撤去されたファイルの削除（`.ops-sync/sync-manifest.txt` 基準）
 
-            このPRは ai-ops の sync workflow が自動生成しました。内容のレビューは ai-ops 側の
+            このPRは ops-sync の sync workflow が自動生成しました。内容のレビューは ops-sync 側の
             マージ時に済んでいます。**同期対象のファイルは手で編集しないでください**
-            （次回同期で上書きされます）。直す場合は `.ai-ops/outbox/` 提案で（→ `docs/outbox-proposal.md`）。
+            （次回同期で上書きされます）。直す場合は `.ops-sync/outbox/` 提案で（→ `docs/outbox-proposal.md`）。
 
       - name: Merge sync PR (per MERGE_MODE)
         if: env.MERGE_MODE != 'off' && steps.create-pr.outputs.pull-request-url != ''

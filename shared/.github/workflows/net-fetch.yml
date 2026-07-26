@@ -4,8 +4,8 @@ name: Net fetch
 # エージェントは egress 制限下でも GitHub には到達できるので、この workflow を workflow_dispatch で
 # 起動し、結果を読み戻す。手順は docs/net-fetch.md。
 #
-# 集約(=public な ai-ops 上で実行し無料枠で回す)と分散(=各 private repo 上で実行し結果を非公開に保つ)の
-# 両モードで同じこの workflow を使う（正本は shared/、ai-ops 自身にも同一コピーを置く。どちらのリポジトリで
+# 集約(=public な ops-sync 上で実行し無料枠で回す)と分散(=各 private repo 上で実行し結果を非公開に保つ)の
+# 両モードで同じこの workflow を使う（正本は shared/、ops-sync 自身にも同一コピーを置く。どちらのリポジトリで
 # 起動するかがモードの違い）。将来の枠連動ルーティング（quota-gate）は「どちらで起動するか」を自動で選ぶ層で、
 # この workflow 自体は変更不要。
 #

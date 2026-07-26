@@ -1,7 +1,7 @@
 # リポジトリ運用ルール（GitHub Copilot 用ポインタ）
 
 このリポジトリの運用ルール・作業手順の**正本はリポジトリ直下の `AGENTS.md`**（＝各エージェント共通の
-メモリ。ai-ops から配布される共通ブロックを含む）。GitHub Copilot は既定でこのファイル
+メモリ。ops-sync から配布される共通ブロックを含む）。GitHub Copilot は既定でこのファイル
 （`.github/copilot-instructions.md`）を常時読み込むため、ここから `AGENTS.md` へ誘導する。
 
 **作業を始める前に、必ず `AGENTS.md` を読み、その内容に従うこと。**

@@ -1,10 +1,10 @@
-# ai-ops 設計ドキュメント
+# ops-sync 設計ドキュメント
 
 全リポジトリ（consumer）共通の **運用ルール**・**共通インフラ（ファイル）**・**リポジトリ横断タスク**を、
-ここ ai-ops を単一の正（source of truth）として各 consumer へ自動配布するための仕組み。手動リレー
+ここ ops-sync を単一の正（source of truth）として各 consumer へ自動配布するための仕組み。手動リレー
 （外部ツールへのコピペ等）を不要にし、リポジトリ間のドリフトを構造的に防ぐのが目的。
 
-> **ai-ops 内での正本パス**: `shared/docs/ops-sync-design.md`（`apply-shared.mjs` により各 consumer へ `docs/ops-sync-design.md` として配布）。
+> **ops-sync 内での正本パス**: `shared/docs/ops-sync-design.md`（`apply-shared.mjs` により各 consumer へ `docs/ops-sync-design.md` として配布）。
 
 ## 解決したい問題
 
@@ -13,7 +13,7 @@
   （AGENTS.md / CLAUDE.md）は自動ロードされない（例外は「前提・限界」のマルチリポジトリセッションの項。
   設計の前提は変わらない）。→ 唯一堅牢な方法は、**共通ルールを各リポジトリの
   AGENTS.md に物理的に存在させる**こと。
-- 同じ制約から「別リポジトリでの作業依頼」も手元に物理的に届ける必要がある（`.ai-ops/tasks/`）。
+- 同じ制約から「別リポジトリでの作業依頼」も手元に物理的に届ける必要がある（`.ops-sync/tasks/`）。
 - 手動コピペは flow であって stock にならず、直し忘れ・コピペずれでドリフトする。
 
 ## なぜ「双方向同期」ではなく「配布＋提案」なのか
@@ -21,24 +21,24 @@
 共通ファイルを複数リポジトリで相互同期すると「書ける場所が複数化 → 多書き込みドリフト・コンフリクト」が
 起きる。そこで方向を非対称にし、**各ファイルの書き手を常に1人**に保つ:
 
-- **下り（配布）**: ai-ops → 全 consumer。ai-ops の main に入ると各 consumer に同期 PR が立つ。
-  **内容のレビューは ai-ops のマージ時に済んでいる**ので、同期 PR は自動マージしてよい（下記 MERGE_MODE）。
-- **上り（提案）**: consumer → ai-ops。consumer のエージェントは `.ai-ops/outbox/` に「提案」を置くだけで、
-  正本を直接書き換えない。取り込みは ai-ops 側の1回の人間レビュー付きマージに集約。
+- **下り（配布）**: ops-sync → 全 consumer。ops-sync の main に入ると各 consumer に同期 PR が立つ。
+  **内容のレビューは ops-sync のマージ時に済んでいる**ので、同期 PR は自動マージしてよい（下記 MERGE_MODE）。
+- **上り（提案）**: consumer → ops-sync。consumer のエージェントは `.ops-sync/outbox/` に「提案」を置くだけで、
+  正本を直接書き換えない。取り込みは ops-sync 側の1回の人間レビュー付きマージに集約。
 
 | ファイル | 唯一の書き手 |
 |---|---|
-| `AGENTS_COMMON.md`・`shared/**`・`tasks/**` | ai-ops でのマージ（人間がレビュー） |
-| consumer の `AGENTS.md` マーカー区間 | ai-ops の sync CI |
-| consumer の `.ai-ops/sync-manifest.txt` に列挙されたファイル | ai-ops の sync CI |
-| consumer の `.ai-ops/outbox/*.md` | その consumer のエージェント |
+| `AGENTS_COMMON.md`・`shared/**`・`tasks/**` | ops-sync でのマージ（人間がレビュー） |
+| consumer の `AGENTS.md` マーカー区間 | ops-sync の sync CI |
+| consumer の `.ops-sync/sync-manifest.txt` に列挙されたファイル | ops-sync の sync CI |
+| consumer の `.ops-sync/outbox/*.md` | その consumer のエージェント |
 | 各リポジトリの `docs/history-inbox/<...>.md`（履歴フラグメント） | 新規1ファイル＝そのリポジトリのエージェント（既存ファイルには触れない） |
-| 各リポジトリの `docs/AI_TASK_HISTORY.md` | inbox の統合・アーカイブ移動とも ai-ops の archive CI（下記・保守バッチ）。エージェントは直接編集しない |
+| 各リポジトリの `docs/AI_TASK_HISTORY.md` | inbox の統合・アーカイブ移動とも ops-sync の archive CI（下記・保守バッチ）。エージェントは直接編集しない |
 
 ## 配布物の三層＋タスク
 
 1. **常時必要な共通ルール（テキスト）** — 正本 `AGENTS_COMMON.md`。`apply-common.mjs` が各 consumer の
-   `AGENTS.md` の `AI-OPS:COMMON` マーカー区間に**埋め込む**（マーカーが無ければ末尾に追記＝初回配線）。
+   `AGENTS.md` の `OPS-SYNC:COMMON` マーカー区間に**埋め込む**（マーカーが無ければ末尾に追記＝初回配線）。
    全 consumer の全タスクのコンテキストコストに乗るため最小限に保つ（上りの `common-block-edit`
    取り込み PR には、この層のサイズ増減〔文字数・概算トークン〕が自動記載され、マージ判断の場で
    肥大化が見える）。
@@ -49,7 +49,7 @@
    各エージェント向けミラー（`.codex/skills/`・`.openhands/skills/`・`.gemini/skills/`・
    `.agents/skills/`〔Antigravity〕・`.qwen/skills/`〔Qwen Code〕・`.cline/skills/`〔Cline〕）は
    `apply-shared.mjs` が**配布時に正本から自動生成**する。
-   以前は ai-ops 側に正本への symlink を1エージェントぶんずつ手で置いていたが、完全に機械的な複製で
+   以前は ops-sync 側に正本への symlink を1エージェントぶんずつ手で置いていたが、完全に機械的な複製で
    張り忘れのドリフト源だったため撤去した（新エージェント対応はスクリプトの一覧への追加1行）。
    Gemini CLI に AGENTS.md を読ませる方法は
    「前提・限界」のエージェント別入口を参照（`GEMINI.md -> AGENTS.md` の入口 symlink＝`apply-entrypoints.mjs`）。
@@ -69,9 +69,9 @@
    **タスク履歴は注入しない**: 毎回は要らず（過去参照タスクのときだけ要る）、どこに何があるかは常時ロードの
    AGENTS.md「タスク履歴（短期記憶）」にあるので on-demand で読む（→ `docs/task-history.md`）。
 4. **リポジトリ横断タスク** — 正本 `tasks/<owner>/<repo>/*.md`。**その consumer だけ**の
-   `.ai-ops/tasks/` へ配置。運用は `docs/cross-repo-tasks.md`。
+   `.ops-sync/tasks/` へ配置。運用は `docs/cross-repo-tasks.md`。
 
-2〜4 は `apply-shared.mjs` が配布し、配布済み一覧を consumer の **`.ai-ops/sync-manifest.txt`** に記録する。
+2〜4 は `apply-shared.mjs` が配布し、配布済み一覧を consumer の **`.ops-sync/sync-manifest.txt`** に記録する。
 **前回 manifest にあって今回の配布物に無いパスは削除**するので、shared/ での撤去・改名やタスク消化も
 consumer へ伝播する（追加しかできない実装だと撤去がドリフトになる）。manifest 導入前から consumer に
 ある unmanaged ファイルの撤去は `sync-deletions.txt`（トゥームストーン）に旧パスを列挙する。
@@ -88,10 +88,10 @@ consumer へ伝播する（追加しかできない実装だと撤去がドリ�
 | `sync-deletions.txt` | （下り）manifest 導入前の unmanaged ファイルを consumer から撤去する一覧 |
 | `.github/workflows/sync.yml` | （下り）main の変更＋cron（1日1回の再適用＝手編集ドリフトの自己修復）で各 consumer へ同期 PR を生成し、MERGE_MODE に応じてマージ |
 | `consumers.txt` | 配布先リポジトリ（`owner/repo`） |
-| `scripts/collect-outbox.mjs` | （上り）consumer の `.ai-ops/outbox/*.md` 提案を種別に応じて反映（1 consumer 分をまとめて処理・不正な提案は `rejected/` へ差し戻し） |
+| `scripts/collect-outbox.mjs` | （上り）consumer の `.ops-sync/outbox/*.md` 提案を種別に応じて反映（1 consumer 分をまとめて処理・不正な提案は `rejected/` へ差し戻し） |
 | `.github/workflows/collect-outbox.yml` | （上り）cron（約6時間ごと）＋手動で起動、取り込み PR＋outbox 掃除 PR を生成。あわせてトゥームストーン掃除（保守） |
 | `scripts/archive-task-history.mjs` | （保守）`docs/history-inbox/` のフラグメントを `docs/AI_TASK_HISTORY.md` へ統合し、保持量超過分を `docs/history-archive/` へ移す |
-| `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ai-ops＋全 consumer を巡回し、未統合フラグメントか超過エントリがあれば統合＋アーカイブ PR を生成・マージ |
+| `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ops-sync＋全 consumer を巡回し、未統合フラグメントか超過エントリがあれば統合＋アーカイブ PR を生成・マージ |
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer から対象が消えた）を刈る |
 | `shared/.github/actions/publish-ephemeral/` | （下り・ファイル）揮発ブランチへの publish。毎回 orphan 1コミットへ書き換え＋TTL 失効＋`--force-with-lease`。恒久ログ用の `publish-ci-logs` と対（下記「揮発する出力と恒久ログを分ける」） |
 
@@ -103,7 +103,7 @@ consumer 側に必要な配線は**無い**（workflow・Secret とも不要）�
 ### 下り（共通ルール／ファイル／タスクを変える・オーナー起点）
 
 ```
-ai-ops: AGENTS_COMMON.md / shared/** / tasks/** を編集して main にマージ
+ops-sync: AGENTS_COMMON.md / shared/** / tasks/** を編集して main にマージ
         （＋cron 1日1回の再適用: consumer 側で手編集されたドリフトを翌日までに自己修復）
    └─ sync.yml が各 consumer をチェックアウト
         ├─ apply-common.mjs: AGENTS.md のマーカー区間を更新
@@ -111,14 +111,14 @@ ai-ops: AGENTS_COMMON.md / shared/** / tasks/** を編集して main にマー�
         └─ apply-shared.mjs: shared/** と tasks/<その consumer>/** を配置
                              （skill ミラーは正本 .claude/skills/ から自動生成）、
                              manifest 差分＋sync-deletions.txt のファイルを削除
-   └─ 各 consumer に同期 PR（ブランチ ai-ops/sync-common）
+   └─ 各 consumer に同期 PR（ブランチ ops-sync/sync-common）
         └─ MERGE_MODE=direct なら即マージ / auto なら auto-merge / off なら手動
 ```
 
 ### 上り（consumer 起点の提案・4種別）
 
 ```
-consumer: エージェントが .ai-ops/outbox/<時刻>-<説明>.md を main に載せる
+consumer: エージェントが .ops-sync/outbox/<時刻>-<説明>.md を main に載せる
    └─ collect-outbox.yml（cron 約6時間ごと・手動可）が全 consumer を clone し、
       最古の提案を持つ consumer の提案をまとめて処理
         ├─ common-block-edit : AGENTS_COMMON.md を全文置換（ベースハッシュで鮮度検査・
@@ -126,9 +126,9 @@ consumer: エージェントが .ai-ops/outbox/<時刻>-<説明>.md を main に
         ├─ shared-file       : shared/<対象パス> を置換
         ├─ task              : tasks/<対象リポジトリ>/ に登録
         ├─ task-done         : tasks/<提案元>/<対象ファイル> を削除
-        └─ 不正な提案        : .ai-ops/outbox/rejected/ へエラーノート付きで差し戻し
+        └─ 不正な提案        : .ops-sync/outbox/rejected/ へエラーノート付きで差し戻し
                                （最古に居座って後続を止めない）
-   └─ ai-ops への取り込み PR（まとめて1本）＋ 提案元への outbox 掃除 PR を生成
+   └─ ops-sync への取り込み PR（まとめて1本）＋ 提案元への outbox 掃除 PR を生成
 オーナーが取り込み PR をマージ → 下り（sync）に合流して配布
 ```
 
@@ -156,10 +156,10 @@ private repo の workflow を dispatch する経路（net-fetch の分散モー�
 `ok` / `tight` / `exhausted` / `unknown` の粗い state に落として `ci-logs` の `quota/actions/actions.json` へ publish する。
 消費側の手順は `docs/actions-quota.md`（全 consumer へ配布）。
 
-- **ai-ops でだけ測る**（`shared/` に置かず consumer へ配布しない）: 枠はアカウント単位なので測定は1箇所で
-  足りる。ai-ops は public なので測定自体が枠を消費しない（枠を測るために枠を食う矛盾を避ける）。
+- **ops-sync でだけ測る**（`shared/` に置かず consumer へ配布しない）: 枠はアカウント単位なので測定は1箇所で
+  足りる。ops-sync は public なので測定自体が枠を消費しない（枠を測るために枠を食う矛盾を避ける）。
   consumer に billing PAT を配らずに済み、「consumer 側に workflow・Secret を置かない」原則とも整合する。
-- **生の使用分数・使用率は publish しない**: ai-ops の `ci-logs` は世界公開なので、band と閾値だけを出す。
+- **生の使用分数・使用率は publish しない**: ops-sync の `ci-logs` は世界公開なので、band と閾値だけを出す。
 - **含有枠の出どころは経路で違う**: 旧 API は `included_minutes` を返すのでそれを使う。enhanced billing
   platform は返さないので repo variable `ACTIONS_QUOTA_INCLUDED_MINUTES`（既定 2,000＝Free）を使う
   ＝**enhanced 経路ではプラン変更時にこの値の更新が要る**。壊れた値は既定へ黙って戻さず `unknown` に
@@ -179,9 +179,9 @@ GitHub Actions の枠が尽きたときの退避先は Cloudflare だが、**CF 
 `quota/cloudflare/cloudflare.json` へ publish する。全体 state に加えてリソース別（`pages_builds` /
 `workers_build_minutes`）の state も出す——退避先として使えるのがどちらかで判断が変わるため。
 
-- **ai-ops でだけ測る**（`actions-quota` と同じ理由: 枠はアカウント単位・public なので GitHub 枠を
+- **ops-sync でだけ測る**（`actions-quota` と同じ理由: 枠はアカウント単位・public なので GitHub 枠を
   食わない・consumer に CF トークンを配らない）。
-- **ai-ops に置く CF トークンは読み取り専用にする**（MUST NOT: 書き込み権限を持たせる）。ai-ops は
+- **ops-sync に置く CF トークンは読み取り専用にする**（MUST NOT: 書き込み権限を持たせる）。ops-sync は
   public で、切替に要る Edit 権限の操作は consumer 側の workflow が自分のトークンで行う。
   なお Workers Builds API は **user-scoped トークン必須**（account-scoped は "Invalid token" になる）。
 - **使用率だけで判定しない**: 同じ月内でも設定変更でレートが不連続に変わる（2026-07 の実測では
@@ -203,7 +203,7 @@ GitHub Actions の枠が尽きたときの退避先は Cloudflare だが、**CF 
 先頭行に挿入すると並行 PR が必ずコンフリクトするため、書き込みを別々のパスに散らして衝突を無くす
 （changelog の towncrier 型フラグメント）。読む側は本体＋`history-inbox/` の両方を見る。
 
-`archive-task-history.yml`（cron 1日1回）が ai-ops＋全 consumer を巡回し、`archive-task-history.mjs` が
+`archive-task-history.yml`（cron 1日1回）が ops-sync＋全 consumer を巡回し、`archive-task-history.mjs` が
 (1) `history-inbox/` のフラグメントを本体へ取り込んでフラグメントを削除（consolidate）、(2) 取り込み後の
 保持量超過分を `docs/history-archive/<YYYY>.md` へ移す（archive）。統合すべきフラグメントか超過エントリが
 あるリポジトリにだけ PR を生成・マージする。consolidate は本体に既にある同一本文のエントリ（本文全体の
@@ -219,14 +219,14 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 - **consumer 側の push 駆動 workflow にしない**: 即時性は上がるが、「consumer 側に workflow・Secret を
   置かない」原則（上記）を破る。保持量はソフト目標なので1日1回の集中巡回で足りる。
   （下り配布する共有 workflow は `OPS_SYNC_TOKEN` の Workflows:RW で push する＝下表の注記参照。ただし
-  それは「ai-ops が正本を配る」下り方向の話で、consumer 側にトリガや Secret を置くこととは別。）
+  それは「ops-sync が正本を配る」下り方向の話で、consumer 側にトリガや Secret を置くこととは別。）
 
 | Secret | 置き場所 | 権限 | 用途 |
 |---|---|---|---|
-| `OPS_SYNC_TOKEN` | ai-ops のみ | ai-ops＋全 consumer / Contents:RW, PR:RW, Workflows:RW | 下り同期 PR・上り取り込み/掃除 PR の作成、consumer の読み取り |
-| `ACTIONS_QUOTA_TOKEN` | ai-ops のみ | アカウント / Plan: Read-only（repo スコープ不要） | Actions 月枠の使用率を billing API で測る（→ 下記「Actions 月枠の信号」） |
-| `CLOUDFLARE_QUOTA_TOKEN` | ai-ops のみ | Cloudflare の **user-scoped・読み取り専用**（Pages: Read / Workers Builds Configuration: Read / Workers Scripts: Read） | CF 月枠を測る（→ 下記「Cloudflare 月枠の信号」）。**書き込み権限を持たせない** |
-| `CLOUDFLARE_ACCOUNT_ID` | ai-ops のみ | ─ | 同上。public repo のログに出さないため secret で持つ |
+| `OPS_SYNC_TOKEN` | ops-sync のみ | ops-sync＋全 consumer / Contents:RW, PR:RW, Workflows:RW | 下り同期 PR・上り取り込み/掃除 PR の作成、consumer の読み取り |
+| `ACTIONS_QUOTA_TOKEN` | ops-sync のみ | アカウント / Plan: Read-only（repo スコープ不要） | Actions 月枠の使用率を billing API で測る（→ 下記「Actions 月枠の信号」） |
+| `CLOUDFLARE_QUOTA_TOKEN` | ops-sync のみ | Cloudflare の **user-scoped・読み取り専用**（Pages: Read / Workers Builds Configuration: Read / Workers Scripts: Read） | CF 月枠を測る（→ 下記「Cloudflare 月枠の信号」）。**書き込み権限を持たせない** |
+| `CLOUDFLARE_ACCOUNT_ID` | ops-sync のみ | ─ | 同上。public repo のログに出さないため secret で持つ |
 
 > **Workflows:RW が要る理由**: `shared/.github/workflows/`（現状 `branch-cleanup.yml`・`net-fetch.yml`）を consumer へ配布するため。
 > GitHub は `.github/workflows/` 配下のファイルを Workflows 権限の無い PAT で push させないので、この権限が
@@ -237,41 +237,41 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 > sync 対象になる前提なら All repositories でも実質同じ）。**新たな共有 workflow を増やすときのみこの権限が
 > 必要**——共有ファイルが composite action（`.github/actions/`）や doc だけなら Workflows 権限は不要。
 
-> 以前は上りを即時にするため各 consumer に `OPS_DISPATCH_TOKEN`（ai-ops への Contents:RW）を置いて
+> 以前は上りを即時にするため各 consumer に `OPS_DISPATCH_TOKEN`（ops-sync への Contents:RW）を置いて
 > `repository_dispatch` していたが、「どの consumer からでもルールの正本に書けるトークン」が増殖する
 > 設計だった（consumer が1つ侵害されると全リポジトリへルールを注入できる増幅経路）。ルール訂正に
 > 即時性は不要なので cron ポーリングに変更し、consumer 側のトークン・workflow を全廃した。
-> ai-ops の main にはブランチ保護を掛けておくこと（PAT による直 push の防止）。
+> ops-sync の main にはブランチ保護を掛けておくこと（PAT による直 push の防止）。
 
-## 実行基盤の分離（ai-ops と ops-runner）
+## 実行基盤の分離（ops-sync と ops-runner）
 
-**エージェントが dispatch する計算は ai-ops で動かさない。** 専用の public な consumer `ops-runner` で動かす
+**エージェントが dispatch する計算は ops-sync で動かさない。** 専用の public な consumer `ops-runner` で動かす
 （現状 net-fetch。`consumers.txt` に載っているので、workflow も allowlist も共通ルールも通常の配布で届く）。
 
 **分割線は「計算 vs 配布」ではなく「`OPS_SYNC_TOKEN` が要るか」**:
 
-| | ai-ops | ops-runner |
+| | ops-sync | ops-runner |
 |---|---|---|
 | 起動者 | cron と push のみ | **エージェントが任意に dispatch** |
 | 外部からの入力 | 取らない（quota は一次 API のみ） | **任意の外部 URL の中身** |
 | Secret | `OPS_SYNC_TOKEN`・quota 用トークン | **無し**（`github.token` のみ） |
 | 中身 | sync / collect-outbox / archive / prune / quota 信号 / `shared/` の正本 | net-fetch の実行 |
 
-ai-ops には全 consumer へ書ける `OPS_SYNC_TOKEN` がある。一方 net-fetch は**エージェントが任意のタイミングで
+ops-sync には全 consumer へ書ける `OPS_SYNC_TOKEN` がある。一方 net-fetch は**エージェントが任意のタイミングで
 起動でき、任意の外部コンテンツを持ち込む唯一の経路**で、性質がまったく違う。同居していても直ちに穴が
 空くわけではない（fetch ジョブに secret を渡さない・`pull_request` トリガが無い・fork PR は承認必須・
 main はブランチ保護）が、**その不変条件を workflow 1つ1つのレビューで維持し続ける**必要がある。
 リポジトリ境界にすれば構造で保たれ、この種の機能が増えても判断は1回で済む。
 
-archive-task-history のようなバッチは「計算」だが cross-repo write が要るので ai-ops 残留。quota 信号も
+archive-task-history のようなバッチは「計算」だが cross-repo write が要るので ops-sync 残留。quota 信号も
 cron 専用で外部入力を取らないため残留する（枠はアカウント単位なので測定は1箇所でよい）。
 
 **限界（誤解しないこと）**: この分離は**一方向**。runner に配るには `OPS_SYNC_TOKEN` が runner にも書ける
-必要があるので、「runner が ai-ops を触れない」は成立するが「ai-ops が runner を触れない」は成立しない。
+必要があるので、「runner が ops-sync を触れない」は成立するが「ops-sync が runner を触れない」は成立しない。
 守っているのは*鍵のある場所に外部コンテンツを持ち込ませない*ことであって、鍵の影響範囲の縮小ではない。
 
-**`ci-logs` は2箇所になる**: quota 信号は ai-ops、net-fetch の結果は ops-runner。分散モードのエージェントは
-「枠の信号は ai-ops、取得結果は実行したリポジトリ」と読み分ける（→ `docs/net-fetch.md`）。
+**`ci-logs` は2箇所になる**: quota 信号は ops-sync、net-fetch の結果は ops-runner。分散モードのエージェントは
+「枠の信号は ops-sync、取得結果は実行したリポジトリ」と読み分ける（→ `docs/net-fetch.md`）。
 
 ## 揮発する出力と恒久ログを分ける
 
@@ -282,7 +282,7 @@ CI が生む出力には性質の違う2種類があり、**同じブランチ�
   `publish-ephemeral`。毎回 orphan 1コミットへ書き換えるので**履歴に堆積せず**、TTL（既定3日）で失効する。
 
 分けた理由は、**git ブランチでは削除が削除にならない**こと。`ci-logs` からファイルを消しても内容は履歴に
-残り、ai-ops は public なので取得結果が世界公開の恒久記録として積み上がる。かといって `ci-logs` ごと
+残り、ops-sync は public なので取得結果が世界公開の恒久記録として積み上がる。かといって `ci-logs` ごと
 orphan 再構築すると quota 信号や archive ログの経緯まで巻き込む。**性質で置き場を分けるのが唯一の解**で、
 分けてあれば揮発側はブランチごと捨てられる。
 
@@ -302,14 +302,14 @@ orphan 再構築すると quota 信号や archive ログの経緯まで巻き込
 
 ## 前提・限界
 
-- **リポジトリの可視性**: ai-ops は **public**、作業リポジトリの consumer（nikki-san / private）は **private**、
-  計算基盤の consumer（ops-runner）は **public**。ai-ops と ops-runner を public にしているのは GitHub Actions の
+- **リポジトリの可視性**: ops-sync は **public**、作業リポジトリの consumer（nikki-san / private）は **private**、
+  計算基盤の consumer（ops-runner）は **public**。ops-sync と ops-runner を public にしているのは GitHub Actions の
   分数節約のため（public repo の GitHub-hosted runner は無料で、運用 workflow・エージェント起点の計算とも
   アカウント枠を消費しない）。帰結:
-  - ai-ops に置く一切（git 履歴・outbox 取り込み結果・shared 配布物）は**世界公開**。secret・consumer の
-    内部情報（インフラ機密等）を ai-ops に置かない。outbox 提案に private repo の中身を貼らない。
+  - ops-sync に置く一切（git 履歴・outbox 取り込み結果・shared 配布物）は**世界公開**。secret・consumer の
+    内部情報（インフラ機密等）を ops-sync に置かない。outbox 提案に private repo の中身を貼らない。
   - 唯一の機微は `OPS_SYNC_TOKEN`（下記）だが Actions secret なので**可視性変更では露出しない**。かつ
-    ai-ops の workflow はどれも `pull_request` では起動しないため、fork PR からトークンを窃取する経路が
+    ops-sync の workflow はどれも `pull_request` では起動しないため、fork PR からトークンを窃取する経路が
     構造的に無い。合鍵保護として **main のブランチ保護**（無料アカウントでは public でのみ enforced。
     archive/collect が自 PR を PAT 自動マージするため**承認必須は 0**）と、Settings → Actions の fork PR
     **「Require approval for all external contributors」**を掛ける。
@@ -327,19 +327,19 @@ orphan 再構築すると quota 信号や archive ログの経緯まで巻き込
 - `shared/` 内の symlink は配布時に**実体化**される（`apply-shared.mjs` はファイル内容を読んでコピーする）。
   consumer には通常ファイルとして届く。コピー時に正本の**パーミッション（実行ビット）も保持**するので、
   実行ファイル（hook・スクリプト）は `shared/` 側で `chmod +x` して置けば consumer でも実行可能で届く。skill の各エージェント向けミラーは `apply-shared.mjs` が正本
-  `.claude/skills/` から自動生成するので、ai-ops 側に二重配置（symlink 含む）を置かない。それ以外で
-  同一内容を複数パスに配りたい場合は ai-ops 側で symlink にしてドリフトを防ぐ。symlink の張り先が
+  `.claude/skills/` から自動生成するので、ops-sync 側に二重配置（symlink 含む）を置かない。それ以外で
+  同一内容を複数パスに配りたい場合は ops-sync 側で symlink にしてドリフトを防ぐ。symlink の張り先が
   `shared/` の外だと CI の checkout に依存するため、**張り先も `shared/` 内に置くこと**。
 - 初回、consumer に同等のインライン記述がある場合は、その consumer だけ初回手作業で
   「インライン削除＋マーカー挿入」を行う（以降はマーカーで置換され重複しない）。
 - 上りの取り込みは**全文置換**なので、複数 doc にまたがる再構成には向かない。その場合は
-  ai-ops のセッションで一括編集する（consumer からは `docs/outbox-proposal.md` の該当節参照）。
+  ops-sync のセッションで一括編集する（consumer からは `docs/outbox-proposal.md` の該当節参照）。
 - collect は1回の実行で、最古の提案を持つ consumer の分をまとめて処理する。別 consumer の提案と、
   同一実行内で衝突する提案（2件目以降の common-block-edit・対象パスが重複する shared-file）は、
-  先行の cleanup PR マージ後の実行で処理される。不正な提案は `.ai-ops/outbox/rejected/` へ
+  先行の cleanup PR マージ後の実行で処理される。不正な提案は `.ops-sync/outbox/rejected/` へ
   エラーノート付きで差し戻されるため、キューに残って後続を止めることはない。
-- 提案・タスクの「なぜ」は frontmatter の `理由:` → 取り込み PR 本文 → ai-ops の PR/git 履歴に残る。
-  consumer のエージェントから ai-ops の履歴は見えないため、**consumer 側でも将来参照しそうな判断根拠は
+- 提案・タスクの「なぜ」は frontmatter の `理由:` → 取り込み PR 本文 → ops-sync の PR/git 履歴に残る。
+  consumer のエージェントから ops-sync の履歴は見えないため、**consumer 側でも将来参照しそうな判断根拠は
   配布 doc（`shared/docs/`）自体に書き込む**こと。
 - エージェントごとに AGENTS.md への入口が違う。**正本は常に `AGENTS.md` 一本**にし、各エージェントを
   そこへ向ける（内容を各ファイルへ複製しない）:
@@ -371,17 +371,17 @@ orphan 再構築すると quota 信号や archive ログの経緯まで巻き込
   - GitHub Copilot は既定で `.github/copilot-instructions.md`（リポジトリ全体のカスタム指示）を常時読む →
     その固定内容ポインタから AGENTS.md へ誘導する（`shared/.github/copilot-instructions.md`）。
   - Continue は `.continue/rules/*.md`（frontmatter `alwaysApply: true` で常時適用）を読む →
-    その固定内容ポインタから AGENTS.md へ誘導する（`shared/.continue/rules/ai-ops.md`）。
+    その固定内容ポインタから AGENTS.md へ誘導する（`shared/.continue/rules/ops-sync.md`）。
   - Cursor は `.cursor/rules/*.mdc`（frontmatter `alwaysApply: true` で常時適用）を読む →
-    その固定内容ポインタから AGENTS.md へ誘導する（`shared/.cursor/rules/ai-ops.mdc`）。
+    その固定内容ポインタから AGENTS.md へ誘導する（`shared/.cursor/rules/ops-sync.mdc`）。
   - Cline は `.clinerules/`（ディレクトリ配下の Markdown を常時ロード）を読む →
-    その固定内容ポインタから AGENTS.md へ誘導する（`shared/.clinerules/ai-ops.md`）。加えて Cline は
+    その固定内容ポインタから AGENTS.md へ誘導する（`shared/.clinerules/ops-sync.md`）。加えて Cline は
     skill（`.cline/skills/<name>/SKILL.md`）を description マッチで自動発火する（v3.48〜。progressive
     loading）ので、他エージェントと同じく `.claude/skills/` を正本とするミラーを `.cline/skills/` にも配る
     （`apply-shared.mjs` の `SKILL_MIRROR_ROOTS`）。＝常時ルールは `.clinerules/` ポインタ、SOP は
     `.cline/skills/` ミラーの二本立て（Gemini / Qwen と同じ構成）。
   - Windsurf は `.windsurf/rules/*.md`（frontmatter `trigger: always_on` で常時適用。1行目から frontmatter）を
-    読む → その固定内容ポインタから AGENTS.md へ誘導する（`shared/.windsurf/rules/ai-ops.md`）。
+    読む → その固定内容ポインタから AGENTS.md へ誘導する（`shared/.windsurf/rules/ops-sync.md`）。
   Copilot / Continue / Cursor / Cline / Windsurf は入口（＝常時ルール層）が**固定内容の実ファイル**（consumer
   非依存・`shared/` の中に置ける）なので、`CLAUDE.md`/`GEMINI.md` のような入口 symlink（`apply-entrypoints.mjs`）
   ではなく `apply-shared.mjs` の通常配布で届く。このうち **Cline だけは skill の自動発火機構を持つ**（上記
@@ -391,4 +391,4 @@ orphan 再構築すると quota 信号や archive ログの経緯まで巻き込
   `GEMINI.md`/`CLAUDE.md` → `AGENTS.md` の入口 symlink は **`shared/` 経由で配れない**（`apply-shared.mjs` は
   symlink を実体化＝凍結し、かつ AGENTS.md は consumer ごとにマーカー区間が異なる＆ `shared/` の外）。
   そこで **`apply-entrypoints.mjs`** が各 consumer の checkout 内に直接 symlink を張る（sync.yml の1ステップ。
-  冪等・既存の実体ファイルは壊さない）。ai-ops 自身の repo 直下にも `CLAUDE.md`/`GEMINI.md -> AGENTS.md` を置く。
+  冪等・既存の実体ファイルは壊さない）。ops-sync 自身の repo 直下にも `CLAUDE.md`/`GEMINI.md -> AGENTS.md` を置く。

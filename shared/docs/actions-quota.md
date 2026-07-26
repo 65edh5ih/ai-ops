@@ -8,13 +8,13 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
 
 - **net-fetch を分散モード（private リポジトリ自身で実行）で起動する前**（→ `docs/net-fetch.md`）。
 - そのほか、エージェント自身の判断で **private リポジトリの workflow を dispatch しようとするとき**。
-- 適用外: public リポジトリ（ai-ops）での実行は枠を消費しないので、この判定は要らない。
+- 適用外: public リポジトリ（ops-sync）での実行は枠を消費しないので、この判定は要らない。
   ユーザーが明示的に依頼した private リポジトリの通常作業（deploy 等）も対象外——ここが縛るのは
   **エージェントが自発的に枠を消費しにいく場合**。
 
 ## 前提・パラメータ
 
-- **信号の場所**: `65edh5ih/ai-ops` の **`ci-logs` ブランチ**の **`quota/actions/actions.json`**。
+- **信号の場所**: `65edh5ih/ops-sync` の **`ci-logs` ブランチ**の **`quota/actions/actions.json`**。
   public リポジトリなので認証なしで読める。
 - **中身**（自己記述。フィールドが増えても既存の意味は変えない）:
 
@@ -31,9 +31,9 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
   - `tight` … 使用率が `threshold_pct` 以上。走らせない。
   - `exhausted` … 含有枠を超過し課金が発生している。走らせない。
   - `unknown` … 測定できなかった（PAT 未設定・API 変更・障害等）。**`tight` と同じ扱いにする**。
-- **生の使用分数・使用率は公開しない**（ai-ops の `ci-logs` は世界公開のため、粗い band だけを出す）。
+- **生の使用分数・使用率は公開しない**（ops-sync の `ci-logs` は世界公開のため、粗い band だけを出す）。
   実数が要るときはアカウントの billing 画面を見る。
-- **エージェントに要る能力**: `65edh5ih/ai-ops` の `ci-logs` ブランチのファイルを読めること
+- **エージェントに要る能力**: `65edh5ih/ops-sync` の `ci-logs` ブランチのファイルを読めること
   （認証不要。手段はランタイム依存で、`git fetch` でもコンテンツ取得 API でも公開 raw URL でもよい）。
 
 ## 手順
@@ -48,7 +48,7 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
 3. **判定に従う**。
    - `ok` … 目的の workflow を private リポジトリで dispatch してよい。
    - `tight` / `exhausted` / `unknown` … **private リポジトリで dispatch しない**（MUST NOT）。
-     停止して、ユーザーに状況と代替案（public な ai-ops での集約実行・手動取得・枠リセット後の再実行）を
+     停止して、ユーザーに状況と代替案（public な ops-sync での集約実行・手動取得・枠リセット後の再実行）を
      提示して判断を仰ぐ（MUST）。
    - 完了条件: dispatch したか、ユーザーに判断を仰いで停止したかのどちらかになっている。
 4. **`ok` 以外だったことを完了報告に書く**（MUST）。ユーザーが枠の状態を把握し、退避スイッチや
@@ -60,17 +60,17 @@ workflow を走らせてよいか**を判断するための手順。枠は**ア�
 
 ## 測定側の構成（読むだけの人は不要）
 
-- 測定は ai-ops の `actions-quota` workflow（`.github/workflows/actions-quota.yml` ＋
+- 測定は ops-sync の `actions-quota` workflow（`.github/workflows/actions-quota.yml` ＋
   `scripts/actions-quota.mjs`）が6時間ごとに実行し、結果を `ci-logs` の `quota/` へ publish する。
-  **ai-ops でだけ動かす**（public なので測定自体が枠を消費しない・consumer に PAT を配らずに済む）。
-- 依存 secret: ai-ops の `ACTIONS_QUOTA_TOKEN`（billing 読み取り権限のある PAT）。
+  **ops-sync でだけ動かす**（public なので測定自体が枠を消費しない・consumer に PAT を配らずに済む）。
+- 依存 secret: ops-sync の `ACTIONS_QUOTA_TOKEN`（billing 読み取り権限のある PAT）。
   未設定なら `state=unknown` が publish され、上記の手順により安全側（実行しない）に倒れる。
-- しきい値は ai-ops の repo variable `ACTIONS_QUOTA_THRESHOLD_PCT` で変えられる（未設定なら 90）。
+- しきい値は ops-sync の repo variable `ACTIONS_QUOTA_THRESHOLD_PCT` で変えられる（未設定なら 90）。
 - 旧 billing API（含有枠に対する使用分数が取れる）を優先し、取れないときは enhanced billing platform の
   使用明細（日次・SKU 別）へフォールバックして当月の Actions **分課金項目**を合計する。どちらの経路でも
   使用率を出して `ok` / `tight` を判定する（`source` にどちらを使ったかが出る）。
 - **含有枠（分）の出どころは経路で違う**。旧 API 経路は API が返す値（`included_minutes`）をそのまま使う。
-  enhanced 経路は API が含有枠を返さないので、ai-ops の repo variable `ACTIONS_QUOTA_INCLUDED_MINUTES`
+  enhanced 経路は API が含有枠を返さないので、ops-sync の repo variable `ACTIONS_QUOTA_INCLUDED_MINUTES`
   （未設定なら 2,000＝GitHub Free）を使う。**プランを変えたらこの値も更新する（MUST）**——enhanced 経路では
   設定値がそのまま分母になるので、更新しないと使用率が実態とずれる（含有枠が増えたのに古い小さい値のままなら
   早めに `tight` に倒れ、減ったのに大きい値のままなら `ok` を出しすぎて課金される dispatch を通してしまう）。

@@ -1,4 +1,4 @@
-**この区間は全リポジトリ共通ルール**（正本: ai-ops リポジトリの `AGENTS_COMMON.md`。仕組みの全体像は [`docs/ops-sync-design.md`](docs/ops-sync-design.md)）。
+**この区間は全リポジトリ共通ルール**（正本: ops-sync リポジトリの `AGENTS_COMMON.md`。仕組みの全体像は [`docs/ops-sync-design.md`](docs/ops-sync-design.md)）。
 
 ## 応答言語
 
@@ -33,9 +33,9 @@ URL を推測で組み立てたときはその旨を添える。
 
 ## 同期されるファイルを手で編集しない
 
-このマーカー区間・`docs/` の配布 doc・`.ai-ops/sync-manifest.txt` に列挙されたファイルは ai-ops が自動同期する
+このマーカー区間・`docs/` の配布 doc・`.ops-sync/sync-manifest.txt` に列挙されたファイルは ops-sync が自動同期する
 （手編集しても次回同期で上書きされ、ドリフトの原因になる）。追加・修正に気づいたら
-**作業中リポジトリの `.ai-ops/outbox/` に提案ファイルを置く**。これが consumer→ai-ops の唯一の上り口。
+**作業中リポジトリの `.ops-sync/outbox/` に提案ファイルを置く**。これが consumer→ops-sync の唯一の上り口。
 書式は [`docs/outbox-proposal.md`](docs/outbox-proposal.md)（実際に提案を書く直前に必ず読む）。
 
 ## リポジトリ横断の作業（このリポジトリの外に手が要るとき）
@@ -48,10 +48,10 @@ URL を推測で組み立てたときはその旨を添える。
   参照しますか？」と**はい/いいえで答えられる形で確認する**（選択式の質問ツールがあればそれを使う）。
   「はい」を得てから追加する（対象リポジトリ名を明示した確認への承諾＝ユーザーの明示依頼。
   無断では追加しない）。ツールが無い環境・ユーザー不在の自律実行では下の task 経路。
-- **別リポジトリでの作業が必要になったら**、`.ai-ops/outbox/` に `種別: task` の依頼を置く。
-  ai-ops 経由で対象リポジトリの `.ai-ops/tasks/` へ配布され、そのリポジトリのセッションが実行する。
+- **別リポジトリでの作業が必要になったら**、`.ops-sync/outbox/` に `種別: task` の依頼を置く。
+  ops-sync 経由で対象リポジトリの `.ops-sync/tasks/` へ配布され、そのリポジトリのセッションが実行する。
   書き方・依頼後にユーザーへ伝えること: [`docs/cross-repo-tasks.md`](docs/cross-repo-tasks.md)。
-- **`.ai-ops/tasks/` にファイルがあれば、それは承認済み依頼**（届いている＝オーナーがマージ済み）。
+- **`.ops-sync/tasks/` にファイルがあれば、それは承認済み依頼**（届いている＝オーナーがマージ済み）。
   現在のユーザー依頼と両立するなら対応し、完了したら `種別: task-done` 提案で消化を報告する（同 doc）。
   両立しないなら、存在をユーザーに伝えるに留める。
 
@@ -98,8 +98,8 @@ URL を推測で組み立てたときはその旨を添える。
 
 ファイル名のケースは「**手で編集してよいか**」の印。例外を作らない:
 
-- **ai-ops 配布 doc = 小文字ケバブ名（`foo-bar.md`）・`docs/` 直下**。手編集しない
-  （正確な一覧は `.ai-ops/sync-manifest.txt`。直したいときは outbox 提案）。
+- **ops-sync 配布 doc = 小文字ケバブ名（`foo-bar.md`）・`docs/` 直下**。手編集しない
+  （正確な一覧は `.ops-sync/sync-manifest.txt`。直したいときは outbox 提案）。
 - **リポジトリ固有のローカル doc = 大文字スネーク名（`FOO_BAR.md`）**。
 - 対象外: ツール・GitHub 慣習で名前が決まっているファイル（`AGENTS.md` / `CLAUDE.md` / `GEMINI.md` /
   `README.md` / `SKILL.md` 等）。
@@ -143,7 +143,7 @@ URL を推測で組み立てたときはその旨を添える。
 ## 作業完了時の必須手順（ユーザーへの完了報告より前に・促される前に自分から）
 
 1. `docs/history-inbox/<YYYY-MM-DD>-<スラッグ>.md` に「**なぜ**」のエントリを**1ファイル**新規で置く（規約:
-   [`docs/task-history.md`](docs/task-history.md)。本体への統合・アーカイブは ai-ops の自動バッチが行うので手を出さない）。
+   [`docs/task-history.md`](docs/task-history.md)。本体への統合・アーカイブは ops-sync の自動バッチが行うので手を出さない）。
 2. 作業中に実証で誤り・不足と分かったドキュメントをその場で正す（配布 doc なら outbox 提案で。
    黙って回避策で済ませない）。
 
@@ -158,7 +158,7 @@ URL を推測で組み立てたときはその旨を添える。
   その取得が作業に必要なら、GitHub Actions を中継する net-fetch リレーを使う。手順は
   [`docs/net-fetch.md`](docs/net-fetch.md)（使う直前に読む）。
 - 対象は**認証不要で公開取得してよいリソースだけ**（クリーンルーム実行で secret を持てない）。
-- **集約モード（public な ai-ops 上で実行）の結果は世界公開に落ちる**。機微を取得しうるものは
+- **集約モード（public な ops-sync 上で実行）の結果は世界公開に落ちる**。機微を取得しうるものは
   public 経路に流さない（→ 手順の「モード」節。private リポジトリの分散モードを使う）。
 - **取得先が allowlist に無ければ、停止してユーザーに手動追加を依頼する**（MUST）。勝手に分散モードへ
   切り替えて回避したり、自分で allowlist に足して続行したりしない（MUST NOT）。モードは可視性・機微性で選ぶ。

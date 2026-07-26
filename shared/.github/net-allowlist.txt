@@ -1,12 +1,12 @@
 # net-fetch 共通許可ドメイン（全リポジトリ共通のベース allowlist）。
-# 正本は ai-ops の shared/.github/net-allowlist.txt。consumer へは sync が配布する。
+# 正本は ops-sync の shared/.github/net-allowlist.txt。consumer へは sync が配布する。
 #
 # ルール:
 #   - 1行1ホスト。行頭 # と空行は無視。
 #   - 完全一致（例: example.com）か、サブドメイン一括の *.example.com のみ。
 #     *.example.com は foo.example.com に一致するが example.com 自身には一致しない
 #     （素の example.com も許可したいなら両方書く）。
-#   - ここは **public な ai-ops にも置かれ、集約(ai-ops上)実行の判定に使われる**。
+#   - ここは **public な ops-sync にも置かれ、集約(ops-sync上)実行の判定に使われる**。
 #     したがって **機微を取得しうるドメインをここに書かない**（世界公開の経路を通ってしまう）。
 #     機微系は各 private リポジトリのローカル allowlist（.github/net-allowlist.local.txt）にだけ書く。
 #   - net-fetch はクリーンルーム実行（secret を一切ジョブに渡さない）なので、

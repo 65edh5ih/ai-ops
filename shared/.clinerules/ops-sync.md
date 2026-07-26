@@ -1,13 +1,8 @@
----
-name: ai-ops 運用ルール
-alwaysApply: true
----
-
-# リポジトリ運用ルール（Continue 用ポインタ）
+# リポジトリ運用ルール（Cline 用ポインタ）
 
 このリポジトリの運用ルール・作業手順の**正本はリポジトリ直下の `AGENTS.md`**（＝各エージェント共通の
-メモリ。ai-ops から配布される共通ブロックを含む）。この rule（`alwaysApply: true`）は全対話で常時
-ロードされるため、ここから `AGENTS.md` へ誘導する。
+メモリ。ops-sync から配布される共通ブロックを含む）。Cline は `.clinerules/` 配下のファイルを常時
+ロードするため、ここから `AGENTS.md` へ誘導する。
 
 **作業を始める前に、必ず `AGENTS.md` を読み、その内容に従うこと。**
 
@@ -16,5 +11,5 @@ alwaysApply: true
 該当する状況になったら対応する `docs/<name>.md` を読んでから作業する。
 
 > このファイルはポインタのみ。ルール本体を書き足さないこと（`AGENTS.md` と二重管理になる）。
-> Continue には skill の自動発火機構が無いため、上記のとおり `AGENTS.md` → `docs/` の参照で手順書層を
-> カバーする（OpenHands V0 と同じ扱い）。
+> 特定タスクの共通 SOP は `.cline/skills/<name>/SKILL.md`（description マッチで自動発火）でも拾えるが、
+> 常時ルール層はこのポインタ経由で `AGENTS.md` を読むのが正。手順書の本体は常に `docs/<name>.md` 側にある。
