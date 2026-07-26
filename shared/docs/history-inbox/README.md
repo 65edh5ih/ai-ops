@@ -1,7 +1,9 @@
 # history-inbox（未統合のタスク履歴フラグメント）
 
 エージェントはタスク履歴を `docs/AI_TASK_HISTORY.md` へ直接追記せず、**1エントリ＝1ファイル**を
-このディレクトリに `docs/history-inbox/<YYYY-MM-DD>-<スラッグ>.md` で置く（並行 PR のコンフリクト回避）。
+`scripts/new-task-history.mjs <タスクスラッグ> "<短いタイトル>"` で、
+`docs/history-inbox/<YYYY-MM-DD>T<HHMMSS>Z-<タスクスラッグ>-<ランダムID>.md` を置く
+（並行PRのコンフリクト回避）。
 ops-sync の archive-task-history バッチが本体へ統合し、取り込んだフラグメントを削除する。
 
 この `README.md` は**ディレクトリを常に git 追跡状態に保つための意図的なプレースホルダ**（消さない）。

@@ -120,8 +120,9 @@ URL を推測で組み立てたときはその旨を添える。
 - 「さっきの◯◯」「昨日のあれ」など**過去スレッドの文脈が前提の依頼**は、まず
   `docs/AI_TASK_HISTORY.md`（統合済み・直近2作業日分）**と `docs/history-inbox/` 内の全ファイル**
   （まだ統合されていない最新のフラグメント）の**両方**を読む。より古い経緯は `docs/history-archive/` を grep。
-- 履歴は本体ファイルに直接追記せず、**1エントリ＝1ファイル**を `docs/history-inbox/` に新規で置く
-  （並行 PR のコンフリクト回避）。書き方・ファイル名規約は [`docs/task-history.md`](docs/task-history.md)（置く直前に読む）。
+- 履歴は本体ファイルに直接追記せず、**1エントリ＝1ファイル**を `scripts/new-task-history.mjs` で
+  `docs/history-inbox/` に新規作成する（時刻＋ランダムIDで並行PRのコンフリクトを回避）。書き方・
+  ファイル名規約は [`docs/task-history.md`](docs/task-history.md)（置く直前に読む）。
 
 ## ブランチ・PR の規律
 
@@ -146,8 +147,9 @@ URL を推測で組み立てたときはその旨を添える。
 
 ## 作業完了時の必須手順（ユーザーへの完了報告より前に・促される前に自分から）
 
-1. `docs/history-inbox/<YYYY-MM-DD>-<スラッグ>.md` に「**なぜ**」のエントリを**1ファイル**新規で置く（規約:
-   [`docs/task-history.md`](docs/task-history.md)。本体への統合・アーカイブは ops-sync の自動バッチが行うので手を出さない）。
+1. `scripts/new-task-history.mjs <タスクスラッグ> "<短いタイトル>"` で、時刻＋ランダムIDを持つ
+   `docs/history-inbox/` の新規ファイルに「**なぜ**」を記録する（規約: [`docs/task-history.md`](docs/task-history.md)。
+   本体への統合・アーカイブは ops-sync の自動バッチが行うので手を出さない）。
 2. 作業中に実証で誤り・不足と分かったドキュメントをその場で正す（配布 doc なら上りで正本を直す。
    黙って回避策で済ませない）。
 

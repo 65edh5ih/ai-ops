@@ -71,6 +71,9 @@
    ＝実質どのタスクでも要るのでフックで確実に載せる（この repo に無ければ skip＝現状 nikki-san のみ発火）。
    **タスク履歴は注入しない**: 毎回は要らず（過去参照タスクのときだけ要る）、どこに何があるかは常時ロードの
    AGENTS.md「タスク履歴（短期記憶）」にあるので on-demand で読む（→ `docs/task-history.md`）。
+   履歴フラグメントは配布スクリプト `shared/scripts/new-task-history.mjs`（consumerでは
+   `scripts/new-task-history.mjs`）で作る。ブランチ名は実行環境によって `work` のような汎用名になりうるため
+   一意性の根拠にせず、UTC時刻＋12桁の暗号学的ランダムIDと排他的作成で並行ブランチ間の衝突を避ける。
 4. **リポジトリ横断タスク** — 正本 `tasks/<owner>/<repo>/*.md`。**その consumer だけ**の
    `.ops-sync/tasks/` へ配置。運用は `docs/cross-repo-tasks.md`。
 
@@ -88,6 +91,8 @@ consumer へ伝播する（追加しかできない実装だと撤去がドリ�
 | `scripts/apply-entrypoints.mjs` | （下り・配線）consumer に `CLAUDE.md` / `GEMINI.md` → `AGENTS.md` の入口 symlink を張る |
 | `shared/**` / `tasks/**` | （下り・ファイル）consumer へ配布する実ファイル・タスク |
 | `scripts/apply-shared.mjs` | （下り・ファイル）shared/tasks の配置（実行ビット保持）＋manifest 差分による削除伝播＋skill ミラーの自動生成 |
+| `shared/scripts/new-task-history.mjs` | （下り・履歴）時刻＋ランダムIDで一意な履歴フラグメントを排他的に新規作成する共通スクリプト |
+| `scripts/new-task-history.mjs` | ops-sync自身が上記正本をconsumerと同じパスで使うためのsymlink |
 | `sync-deletions.txt` | （下り）manifest 導入前の unmanaged ファイルを consumer から撤去する一覧 |
 | `.github/workflows/sync.yml` | （下り）main の変更＋cron（1日1回の再適用＝手編集ドリフトの自己修復）で各 consumer へ同期 PR を生成し、MERGE_MODE に応じてマージ |
 | `consumers.txt` | 配布先リポジトリ（`owner/repo`） |
@@ -204,7 +209,9 @@ GitHub Actions の枠が尽きたときの退避先は Cloudflare だが、**CF 
 #### タスク履歴の統合とアーカイブ
 
 エージェントは履歴を `docs/AI_TASK_HISTORY.md` へ直接追記せず、**1エントリ＝1ファイル**で
-`docs/history-inbox/<YYYY-MM-DD>-<スラッグ>.md` に置く（→ `docs/task-history.md`）。全セッションが本体の
+`scripts/new-task-history.mjs` を使い、
+`docs/history-inbox/<YYYY-MM-DD>T<HHMMSS>Z-<タスクスラッグ>-<ランダムID>.md` に置く
+（→ `docs/task-history.md`）。全セッションが本体の
 先頭行に挿入すると並行 PR が必ずコンフリクトするため、書き込みを別々のパスに散らして衝突を無くす
 （changelog の towncrier 型フラグメント）。読む側は本体＋`history-inbox/` の両方を見る。
 

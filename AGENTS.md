@@ -75,8 +75,9 @@ consumer に残る。
 
 ## 履歴ファイル
 
-ops-sync での作業の「**なぜ**」（コードに無い制約・判断根拠）は **`docs/history-inbox/<YYYY-MM-DD>-<スラッグ>.md`**
-に**1エントリ＝1ファイル**で置く（本体 `docs/AI_TASK_HISTORY.md` への統合は自動バッチが行う。書き方・
+ops-sync での作業の「**なぜ**」（コードに無い制約・判断根拠）は `scripts/new-task-history.mjs` で
+**`docs/history-inbox/<YYYY-MM-DD>T<HHMMSS>Z-<タスクスラッグ>-<ランダムID>.md`** に**1エントリ＝1ファイル**で
+置く（本体 `docs/AI_TASK_HISTORY.md` への統合は自動バッチが行う。書き方・
 ファイル名規約・統合/アーカイブは全リポジトリ共通規約 [`docs/task-history.md`](docs/task-history.md) に従う）。
 consumer に影響する変更・ops-sync 内部だけの変更の区別なく、ここ1箇所でよい:
 上り提案由来の変更は取り込み PR の本文（`理由:`）にも経緯が残り、consumer 側で将来参照しそうな判断根拠は
