@@ -83,13 +83,12 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
    勝手に (a) 分散モードへ切り替えて回避する・(b) 自分で allowlist にドメインを足して続行する、のは**しない**
    （MUST NOT）。**allowlist に何を許すかはユーザーが決める**。依頼には「どのファイルに何を足すか」を明示する:
    - **共通ベースに足す**（＝ ops-sync 側の変更）: `shared/.github/net-allowlist.txt` が**唯一の正本**。
-     **エージェントが ops-sync をセッションから直接参照できている（`add_repo` 等）なら、outbox を
-     経由せずそこで直接ブランチを切って編集し、ops-sync 自身に PR を出す**（人間のマージだけを待てばよく、
-     collect workflow の非同期cron待ち（約6時間）を挟まない分速い）。**ops-sync を直接参照する手段を持たない
-     エージェントだけ** `種別: shared-file` の outbox 提案（→ `docs/outbox-proposal.md`）を使う。
-     ここで参照が要るのは**正本のある ops-sync** で、step 2 でセッションに足す実行先の ops-runner とは別物
-     （両方に足しても構わないが、allowlist を直せるのは ops-sync だけ）。どちらの経路でも編集するのは
-     `shared/` の1ファイルで、ops-runner や consumer に届く同名ファイルは sync が配る複製なので触らない。
+     ops-runner や consumer に届く同名ファイルは sync が配る複製なので、直しても効かない（触らない。MUST NOT）。
+     **正本を直す経路（ops-sync へ直接 PR / `種別: shared-file` の outbox 提案）と、その選び方は
+     [`docs/outbox-proposal.md`](outbox-proposal.md) に従う**（MUST）——どちらの経路でも**追加を決めるのは
+     ユーザーで、入るのは ops-sync 側の人間のマージ**という上の要求は変わらない。ここで足りないのは
+     **正本のある ops-sync** への手で、step 2 でセッションに足した実行先の ops-runner とは別物
+     （ops-runner の承諾はここには使えない。allowlist の正本を直せるのは ops-sync だけ）。
      **機微を取得しうるドメインは共通ベースに入れない**（world-public な集約経路を通ってしまう。ただし
      「ドメイン自体が機微か」で判断する——多数ユーザーの公開コンテンツを配信する汎用CDNは、たまたま
      今回取得したい個別コンテンツが私的でも、ドメインとしては機微ではない。個別コンテンツの機微性は

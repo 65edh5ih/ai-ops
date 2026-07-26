@@ -143,9 +143,16 @@ consumer 側のセットアップは**不要**（workflow・Secret とも置か�
 
 ### 上り（consumer 起点で共通ルール・ファイルを直す／作業を依頼する）
 
-consumer での作業中に AI エージェントが気づいたことは、作業リポジトリの `.ops-sync/outbox/` に
-提案ファイルとして置くだけでよい（書式: `shared/docs/outbox-proposal.md`。consumer では
-`docs/outbox-proposal.md`）。ops-sync の collect workflow（cron 約6時間ごと）が拾い、
+consumer での作業中に AI エージェントが気づいたことは、**正本のある ops-sync 側へ**出す。経路は2つで、
+選び方と書式は `shared/docs/outbox-proposal.md`（consumer では `docs/outbox-proposal.md`）:
+
+- **ops-sync をセッションに追加できるエージェント**（Claude Code on the web の `add_repo` 等。ユーザーの
+  承諾が要る）は、正本へ**直接 PR** を出す。collect の非同期待ちが無いぶん速い。
+- **その手段が無いエージェント・ユーザー不在の自律実行**は、作業リポジトリの `.ops-sync/outbox/` に
+  提案ファイルを置く。
+
+どちらでも正本に入るのはオーナーのマージ（エージェントは自分でマージしない）。outbox 経路では
+ops-sync の collect workflow（cron 約6時間ごと）が拾い、
 **取り込み PR**（ops-sync 側。同一リポジトリの提案はまとめて1本、`common-block-edit` には
 常時層サイズの増減を自動記載）と **outbox 掃除 PR**（consumer 側）を自動生成する。
 不正な提案は取り込まれず `.ops-sync/outbox/rejected/` へエラーノート付きで差し戻される
