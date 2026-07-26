@@ -28,7 +28,7 @@ on:
       prefixes:
         description: '削除対象にするブランチ名プレフィックス（空白区切り）'
         type: string
-        default: 'claude/ codex/ codex- ops-sync/ import-posts-'
+        default: 'claude/ codex/ codex- ai-ops/ ops-sync/ import-posts-'
       keep:
         description: '常に保護するブランチ名（空白区切り。既定ブランチとオープン PR の head は自動保護）'
         type: string
@@ -75,9 +75,15 @@ jobs:
           # 保護対象: keep 一覧 + 既定ブランチ + オープン PR の head
           declare -A protect
           for b in $KEEP $default_branch; do protect["$b"]=1; done
+          open_pr_heads="$(mktemp)"
+          if ! gh pr list --state open --limit 1000 --json headRefName --jq '.[].headRefName' > "$open_pr_heads"; then
+            echo "::error::failed to enumerate open PR heads; aborting cleanup to avoid deleting a protected branch"
+            exit 1
+          fi
           while IFS= read -r h; do
             [ -n "$h" ] && protect["$h"]=1
-          done < <(gh pr list --state open --limit 1000 --json headRefName --jq '.[].headRefName')
+          done < "$open_pr_heads"
+          rm -f "$open_pr_heads"
 
           cutoff=$(( $(date -u +%s) - AGE_DAYS * 86400 ))
 

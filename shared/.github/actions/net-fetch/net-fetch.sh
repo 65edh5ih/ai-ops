@@ -125,6 +125,7 @@ emit() {
       echo "http_status=$http_status"
       echo "result_dir=$OUTPUT_DIR"
       echo "dest=$DEST"
+      echo "safe_request_id=$SAFE_REQUEST_ID"
     } >> "$GITHUB_OUTPUT"
   fi
   echo "net-fetch: status=$status http=$http_status reason=${reason:-none} id=$SAFE_REQUEST_ID"

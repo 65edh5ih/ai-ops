@@ -23,6 +23,7 @@
 依頼を出したら（経路と書式: [`docs/outbox-proposal.md`](outbox-proposal.md)）、**ユーザーに次を伝える**:
 
 - 「ops-sync 側の PR → 対象リポジトリの同期 PR の順にマージされると届きます」
+- 起票経路の完了条件を確認する（MUST）: 直接 PR は ops-sync の open PR URL、outbox は提案を含む open PR URLを示す。
 - **対象リポジトリのセッションに貼るコピペ用の指示文**（1つずつ・冒頭に1行の概要。Claude Code は
   最初の入力からセッションタイトルを生成するため）:
 
@@ -43,7 +44,8 @@
   - 満たし方は起票と同じ2経路（選び方は → `docs/outbox-proposal.md`）: 正本への**直接 PR** なら
     `tasks/<owner>/<repo>/<ファイル名>` を削除する PR、**outbox** なら `種別: task-done` の提案。
   - **セッション内の完了条件**（エージェントが自分で確認できるのはここまで）: 直接 PR なら ops-sync に
-    open な PR があり URL をユーザーに伝えてある／outbox なら提案がこのリポジトリの `main` に載っている。
+    open な PR があり URL をユーザーに伝えてある／outbox なら提案ファイルを含む open な PR があり、
+    その URL をユーザーに伝えてある。`git status --short` で意図しない未コミット変更がないことも確認する（MUST）。
   - **消化が効くのは非同期**（オーナーのマージ→〔outbox 経路なら〕collect の cron→sync）。
     **ここまで待たない**（MUST NOT: `.ops-sync/tasks/` から実際に消えるまで待って作業を止める）。
     エージェントはマージできないので、待っても自力では到達できない。

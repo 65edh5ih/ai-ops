@@ -25,6 +25,10 @@ inputs:
     description: Ephemeral branch to publish into.
     required: false
     default: "net-fetch-results"
+  slice-root:
+    description: Top-level directory containing per-result slices.
+    required: false
+    default: "net-fetch"
   retention-days:
     description: >-
       Slices older than this are dropped on every write. Must be a positive
@@ -54,6 +58,7 @@ runs:
         SRC: ${{ inputs.source-dir }}
         DEST: ${{ inputs.dest }}
         BRANCH: ${{ inputs.branch }}
+        SLICE_ROOT: ${{ inputs.slice-root }}
         RETENTION_DAYS: ${{ inputs.retention-days }}
         PRUNE_ONLY: ${{ inputs.prune-only }}
         MSG: ${{ inputs.commit-message }}
@@ -109,6 +114,15 @@ runs:
           local now cutoff marker dir ts
           now="$(date -u +%s)"
           cutoff="$(( now - RETENTION_DAYS * 86400 ))"
+          # A missing marker cannot establish a safe retention age. Fail toward deletion.
+          if [ -d "${tmp}/${SLICE_ROOT}" ]; then
+            while IFS= read -r -d '' dir; do
+              if [ ! -f "${dir}/.published-at" ]; then
+                echo "publish-ephemeral: expiring $(basename "$dir") (missing publication marker)"
+                rm -rf "$dir"
+              fi
+            done < <(find "${tmp}/${SLICE_ROOT}" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+          fi
           while IFS= read -r -d '' marker; do
             dir="$(dirname "$marker")"
             ts="$(head -c 32 "$marker" 2>/dev/null | tr -dc '0-9')"

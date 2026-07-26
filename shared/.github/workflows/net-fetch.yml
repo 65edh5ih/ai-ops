@@ -95,7 +95,7 @@ jobs:
         # 展開するため request_id=$(...) 等でスクリプト注入されうる。値はすべて env 経由で渡し、
         # $VAR として printf する（env の値は再評価されない）。URL は伏字済み meta.txt から拾う。
         env:
-          REQUEST_ID: ${{ inputs.request_id }}
+          SAFE_REQUEST_ID: ${{ steps.fetch.outputs.safe-request-id }}
           STATUS: ${{ steps.fetch.outputs.status }}
           HTTP_STATUS: ${{ steps.fetch.outputs.http-status }}
           DEST: ${{ steps.fetch.outputs.dest }}
@@ -105,7 +105,7 @@ jobs:
           [ -f net-fetch-out/meta.txt ] && safe_url="$(grep -m1 '^url=' net-fetch-out/meta.txt | cut -d= -f2-)"
           {
             printf '## net-fetch\n\n'
-            printf -- '- request_id: `%s`\n' "$REQUEST_ID"
+            printf -- '- request_id: `%s`\n' "$SAFE_REQUEST_ID"
             printf -- '- url: `%s`\n' "$safe_url"
             printf -- '- status: **%s** (http %s)\n' "$STATUS" "$HTTP_STATUS"
             printf -- '- result slice: `%s/` on the `%s` branch\n' "$DEST" "$RESULT_BRANCH"
