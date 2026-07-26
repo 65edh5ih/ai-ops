@@ -14,7 +14,7 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
 ## 前提・パラメータ
 
 - **取得先ドメインが allowlist にあること**。allowlist は2層の union:
-  - 共通ベース: `.github/net-allowlist.txt`（ai-ops が全リポジトリへ配布。**public な ai-ops にも置かれ、
+  - 共通ベース: `.github/net-allowlist.txt`（ai-ops が全リポジトリへ配布。**public な ops-runner にも配られ、
     集約モードの判定に使われる**ため、機微を取得しうるドメインは**書かない**）。
   - リポジトリ固有: `.github/net-allowlist.local.txt`（各リポジトリが自分で持つ・配布対象外・任意）。
     **機微を取得しうるドメインはここ（private リポジトリのローカル）にだけ書く**。
@@ -33,24 +33,24 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
   - **結果を読み戻せる**こと。満たし方は2通りあり、どちらでもよい（→ 手順5）: 対象リポジトリの
     **結果ブランチのファイルを読める**（`git fetch` かコンテンツ取得 API）、または**ジョブログの本文を
     取得できる**（GitHub の MCP ツール等）。
-  - 集約モードを使うなら追加で、**ai-ops をセッションから参照できる**こと。これは Claude Code on the web の
+  - 集約モードを使うなら追加で、**ops-runner をセッションから参照できる**こと。これは Claude Code on the web の
     `add_repo`（別リポジトリをセッションに足す機能）を前提にした経路。この機能を持たないエージェント
-    （Codex / Gemini CLI / OpenHands / Qwen / Cline 等）は、代わりに ai-ops へ dispatch/読み取りできる資格情報を
+    （Codex / Gemini CLI / OpenHands / Qwen / Cline 等）は、代わりに ops-runner へ dispatch/読み取りできる資格情報を
     別途持つ必要があり、無ければ**集約モードは実行できない**（→ 下記モード節。実行できないことを分散モードで
     回避しない。停止してユーザーに依頼する）。
   - **上記いずれかを満たせないときは、そこで停止してユーザーに依頼する**（MUST）。足りない能力を回避しようと
     別モードや別経路へ勝手に切り替えない（MUST NOT。可視性・機微性を無視したモード選択になるため。→ モード節）。
 - **実行リポジトリの選択（モード）**——どちらで起動するかで可視性と枠消費が決まる:
-  - **集約**: public な **ai-ops** で起動する。GitHub Actions 分は無料。ただし**結果は ai-ops の結果ブランチ
-    とジョブログ＝世界公開**に落ちる（揮発するが、失効するまでは公開）。→ public に晒してよい取得のみ。
+  - **集約**: public な計算基盤 **ops-runner** で起動する。GitHub Actions 分は無料。ただし**結果は ops-runner の
+    結果ブランチとジョブログ＝世界公開**に落ちる（揮発するが、失効するまでは公開）。→ public に晒してよい取得のみ。
     共通ベース allowlist だけが効くので、機微ドメインは構造的にここを通れない。
   - **分散**: 作業中の **private リポジトリ自身**で起動する。結果はそのリポジトリの結果ブランチとジョブログ
     （ともに非公開）に留まる。共通∪固有 allowlist が効くので機微ドメインも取得できる。private リポジトリの
     月枠を消費する。
   - 現状の既定は **集約**（枠が逼迫しているため）。public に晒せない取得だけ分散にする。
     枠残量による集約/分散の自動選択（quota-gate）は将来の共通基盤で足す（この手順・workflow は変更不要）。
-    ただし集約は ai-ops をセッションから参照できること（Claude Code on the web の `add_repo` 等）が前提。
-    **その手段（および ai-ops への dispatch/読み取り資格情報）を持たないエージェントは、集約が正しい取得
+    ただし集約は ops-runner をセッションから参照できること（Claude Code on the web の `add_repo` 等）が前提。
+    **その手段（および ops-runner への dispatch/読み取り資格情報）を持たないエージェントは、集約が正しい取得
     （＝機微でない）では停止してユーザーに集約実行を依頼する**（MUST）。能力不足を分散モードで回避しない
     （MUST NOT。モードは可視性・機微性で選ぶ原則を崩し、public 相当の取得を private 枠・非公開の結果ブランチに
     落とすため）。分散を使うのは取得内容が機微で分散が正しいときだけ。
@@ -68,14 +68,14 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
 
 ## 手順
 
-1. **モードと実行リポジトリを決める**（上記）。集約なら対象は `65edh5ih/ai-ops`、分散なら作業中リポジトリ。
-2. **集約モードで ai-ops を使うなら、セッションから ai-ops を参照できるようにする**。エージェント起点で勝手に
-   追加しない（MUST NOT）——ユーザーに「`65edh5ih/ai-ops` をこのセッションに追加して取得に使いますか？」と
+1. **モードと実行リポジトリを決める**（上記）。集約なら対象は `65edh5ih/ops-runner`、分散なら作業中リポジトリ。
+2. **集約モードで ops-runner を使うなら、セッションから ops-runner を参照できるようにする**。エージェント起点で勝手に
+   追加しない（MUST NOT）——ユーザーに「`65edh5ih/ops-runner` をこのセッションに追加して取得に使いますか？」と
    はい/いいえで確認し、承諾を得てから追加する（Claude Code on the web なら `add_repo`。→ `docs/cross-repo-tasks.md`
-   と同じ作法）。**この手段（別リポジトリのセッション追加）を持たず、ai-ops への dispatch/読み取り資格情報も
+   と同じ作法）。**この手段（別リポジトリのセッション追加）を持たず、ops-runner への dispatch/読み取り資格情報も
    無いエージェントは集約モードを実行できない**。このとき能力不足を分散モードで回避しない（MUST NOT）——
    モードは step 1 のとおり可視性・機微性だけで選ぶ。機微でない（集約が正しい）取得なら、**ここで停止して
-   ユーザーに集約実行（repo 追加か ai-ops への dispatch/読み取り）を依頼する**（MUST。勝手に分散へ落とすと、
+   ユーザーに集約実行（repo 追加か ops-runner への dispatch/読み取り）を依頼する**（MUST。勝手に分散へ落とすと、
    local allowlist だけにあるホストを step 3 が許可扱いして共通 allowlist のユーザー判断を素通りし、public 相当の
    取得を private 枠・非公開の結果ブランチに落とす）。分散モードで起動するのは、step 1 で取得内容が機微＝分散が
    正しいと判断したときだけ。
@@ -83,12 +83,13 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
    勝手に (a) 分散モードへ切り替えて回避する・(b) 自分で allowlist にドメインを足して続行する、のは**しない**
    （MUST NOT）。**allowlist に何を許すかはユーザーが決める**。依頼には「どのファイルに何を足すか」を明示する:
    - **共通ベースに足す**（＝ ai-ops 側の変更）: `shared/.github/net-allowlist.txt` が**唯一の正本**。
-     **エージェントが step 2 で ai-ops をセッションから直接参照できている（`add_repo` 等）なら、outbox を
+     **エージェントが ai-ops をセッションから直接参照できている（`add_repo` 等）なら、outbox を
      経由せずそこで直接ブランチを切って編集し、ai-ops 自身に PR を出す**（人間のマージだけを待てばよく、
      collect workflow の非同期cron待ち（約6時間）を挟まない分速い）。**ai-ops を直接参照する手段を持たない
      エージェントだけ** `種別: shared-file` の outbox 提案（→ `docs/outbox-proposal.md`）を使う。
-     どちらの経路でも、ai-ops 自身の集約実行が読む root の `.github/net-allowlist.txt` は shared への
-     symlink なので二重編集は不要（consumer には sync が実ファイルで届く）。
+     ここで参照が要るのは**正本のある ai-ops** で、step 2 でセッションに足す実行先の ops-runner とは別物
+     （両方に足しても構わないが、allowlist を直せるのは ai-ops だけ）。どちらの経路でも編集するのは
+     `shared/` の1ファイルで、ops-runner や consumer に届く同名ファイルは sync が配る複製なので触らない。
      **機微を取得しうるドメインは共通ベースに入れない**（world-public な集約経路を通ってしまう。ただし
      「ドメイン自体が機微か」で判断する——多数ユーザーの公開コンテンツを配信する汎用CDNは、たまたま
      今回取得したい個別コンテンツが私的でも、ドメインとしては機微ではない。個別コンテンツの機微性は

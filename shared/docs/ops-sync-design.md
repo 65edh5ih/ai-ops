@@ -243,6 +243,36 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 > 即時性は不要なので cron ポーリングに変更し、consumer 側のトークン・workflow を全廃した。
 > ai-ops の main にはブランチ保護を掛けておくこと（PAT による直 push の防止）。
 
+## 実行基盤の分離（ai-ops と ops-runner）
+
+**エージェントが dispatch する計算は ai-ops で動かさない。** 専用の public な consumer `ops-runner` で動かす
+（現状 net-fetch。`consumers.txt` に載っているので、workflow も allowlist も共通ルールも通常の配布で届く）。
+
+**分割線は「計算 vs 配布」ではなく「`OPS_SYNC_TOKEN` が要るか」**:
+
+| | ai-ops | ops-runner |
+|---|---|---|
+| 起動者 | cron と push のみ | **エージェントが任意に dispatch** |
+| 外部からの入力 | 取らない（quota は一次 API のみ） | **任意の外部 URL の中身** |
+| Secret | `OPS_SYNC_TOKEN`・quota 用トークン | **無し**（`github.token` のみ） |
+| 中身 | sync / collect-outbox / archive / prune / quota 信号 / `shared/` の正本 | net-fetch の実行 |
+
+ai-ops には全 consumer へ書ける `OPS_SYNC_TOKEN` がある。一方 net-fetch は**エージェントが任意のタイミングで
+起動でき、任意の外部コンテンツを持ち込む唯一の経路**で、性質がまったく違う。同居していても直ちに穴が
+空くわけではない（fetch ジョブに secret を渡さない・`pull_request` トリガが無い・fork PR は承認必須・
+main はブランチ保護）が、**その不変条件を workflow 1つ1つのレビューで維持し続ける**必要がある。
+リポジトリ境界にすれば構造で保たれ、この種の機能が増えても判断は1回で済む。
+
+archive-task-history のようなバッチは「計算」だが cross-repo write が要るので ai-ops 残留。quota 信号も
+cron 専用で外部入力を取らないため残留する（枠はアカウント単位なので測定は1箇所でよい）。
+
+**限界（誤解しないこと）**: この分離は**一方向**。runner に配るには `OPS_SYNC_TOKEN` が runner にも書ける
+必要があるので、「runner が ai-ops を触れない」は成立するが「ai-ops が runner を触れない」は成立しない。
+守っているのは*鍵のある場所に外部コンテンツを持ち込ませない*ことであって、鍵の影響範囲の縮小ではない。
+
+**`ci-logs` は2箇所になる**: quota 信号は ai-ops、net-fetch の結果は ops-runner。分散モードのエージェントは
+「枠の信号は ai-ops、取得結果は実行したリポジトリ」と読み分ける（→ `docs/net-fetch.md`）。
+
 ## 揮発する出力と恒久ログを分ける
 
 CI が生む出力には性質の違う2種類があり、**同じブランチに混ぜると片方の要求を満たせなくなる**ので分けている。
