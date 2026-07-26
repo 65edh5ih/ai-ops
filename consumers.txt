@@ -3,3 +3,6 @@
 # 行頭 # と空行は無視。consumer を増やすときはここに追記する（PAT のアクセス対象にも追加すること）。
 65edh5ih/nikki-san
 65edh5ih/private
+# 計算基盤。エージェントが dispatch する workflow（net-fetch）を動かすための consumer で、
+# 書き込み権限を持つ資格情報を置かない。public なので配布物も実行結果も世界公開になる。
+65edh5ih/ops-runner

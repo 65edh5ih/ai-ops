@@ -272,9 +272,10 @@ orphan 再構築すると quota 信号や archive ログの経緯まで巻き込
 
 ## 前提・限界
 
-- **リポジトリの可視性**: ai-ops は **public**、consumer（nikki-san / private）は **private**。ai-ops を public に
-  しているのは GitHub Actions の分数節約のため（public repo の GitHub-hosted runner は無料で、ai-ops 自身の
-  運用 workflow がアカウント枠を消費しない）。帰結:
+- **リポジトリの可視性**: ai-ops は **public**、作業リポジトリの consumer（nikki-san / private）は **private**、
+  計算基盤の consumer（ops-runner）は **public**。ai-ops と ops-runner を public にしているのは GitHub Actions の
+  分数節約のため（public repo の GitHub-hosted runner は無料で、運用 workflow・エージェント起点の計算とも
+  アカウント枠を消費しない）。帰結:
   - ai-ops に置く一切（git 履歴・outbox 取り込み結果・shared 配布物）は**世界公開**。secret・consumer の
     内部情報（インフラ機密等）を ai-ops に置かない。outbox 提案に private repo の中身を貼らない。
   - 唯一の機微は `OPS_SYNC_TOKEN`（下記）だが Actions secret なので**可視性変更では露出しない**。かつ
