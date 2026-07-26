@@ -1,7 +1,7 @@
 name: Cloudflare quota
 
 # Cloudflare 側の月枠（Pages のビルド回数・Workers Builds の分数）を実測し、`ci-logs` ブランチの
-# `quota/cloudflare.json` へ粗い state として公開する。GitHub 枠の逼迫時に「CF へ退避してよいか」を
+# `quota/cloudflare/cloudflare.json` へ粗い state として公開する。GitHub 枠の逼迫時に「CF へ退避してよいか」を
 # 判断するための、`actions-quota` の対になる信号（手順: scripts/cloudflare-quota.mjs 冒頭）。
 #
 # **ai-ops でだけ動かす**（shared/ に置かず consumer へ配布しない）。理由は actions-quota と同じ:
@@ -90,7 +90,7 @@ jobs:
           {
             printf '## Cloudflare quota\n\n'
             printf -- '- state: **%s**\n' "${STATE:-unknown}"
-            printf -- '- published to: `quota/cloudflare.json` on the `ci-logs` branch\n'
+            printf -- '- published to: `quota/cloudflare/cloudflare.json` on the `ci-logs` branch\n'
           } >> "$GITHUB_STEP_SUMMARY"
 
       # docs/ci-logs.md 手順A-3。**publish 先（ai-ops の ci-logs）は世界公開なので、万一ログに token 形が
@@ -106,11 +106,13 @@ jobs:
               logs/ci/scripts/cloudflare-quota.log > cloudflare-quota-out/cloudflare-quota.log
           fi
 
+      # **dest は信号ごとに分ける**（MUST）。publish-ci-logs は publish 前に dest を丸ごと
+      # `rm -rf` するので、actions-quota と `quota` を共有すると互いの JSON を消し合う。
       - name: Publish result to ci-logs branch
         if: always()
         uses: ./.github/actions/publish-ci-logs
         with:
           source-dir: cloudflare-quota-out
-          dest: quota
+          dest: quota/cloudflare
           commit-message: "ci(cloudflare-quota): ${{ steps.measure.outputs.state || 'unknown' }}"
           token: ${{ github.token }}

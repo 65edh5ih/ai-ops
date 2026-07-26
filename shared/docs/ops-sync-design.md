@@ -152,7 +152,7 @@ private repo の workflow を dispatch する経路（net-fetch の分散モー�
 留まらず spending limit 設定次第で実費課金につながるため、実行前に読む信号を1つ用意する。
 
 `actions-quota.yml`（cron 6時間ごと）が `actions-quota.mjs` を実行し、billing API で測った使用率を
-`ok` / `tight` / `exhausted` / `unknown` の粗い state に落として `ci-logs` の `quota/actions.json` へ publish する。
+`ok` / `tight` / `exhausted` / `unknown` の粗い state に落として `ci-logs` の `quota/actions/actions.json` へ publish する。
 消費側の手順は `docs/actions-quota.md`（全 consumer へ配布）。
 
 - **ai-ops でだけ測る**（`shared/` に置かず consumer へ配布しない）: 枠はアカウント単位なので測定は1箇所で
@@ -175,7 +175,7 @@ GitHub Actions の枠が尽きたときの退避先は Cloudflare だが、**CF 
 今度は CF を溶かして「どこにもデプロイできない」に至るので、対になる信号を持つ。
 
 `cloudflare-quota.yml`（cron 6時間ごと）が `cloudflare-quota.mjs` を実行し、`ci-logs` の
-`quota/cloudflare.json` へ publish する。全体 state に加えてリソース別（`pages_builds` /
+`quota/cloudflare/cloudflare.json` へ publish する。全体 state に加えてリソース別（`pages_builds` /
 `workers_build_minutes`）の state も出す——退避先として使えるのがどちらかで判断が変わるため。
 
 - **ai-ops でだけ測る**（`actions-quota` と同じ理由: 枠はアカウント単位・public なので GitHub 枠を

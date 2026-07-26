@@ -19,6 +19,7 @@
 //   CFQ_RATE_DAYS     直近レートを測る窓（日）。既定 7
 //   CFQ_STALE_HOURS   消費側が「古すぎる」と判断すべき時間。既定 24
 //   CFQ_OUTPUT_DIR    出力先ディレクトリ（既定 cloudflare-quota-out）
+//   CFQ_NOW           テスト用の時刻上書き（ISO8601）。本番では設定しない
 //
 // 出力: <CFQ_OUTPUT_DIR>/cloudflare.json（全体 state ＋ リソース別 state）
 //
@@ -103,12 +104,22 @@ if (!rateDays.valid) UNKNOWN(`CFQ_RATE_DAYS must be a number in (0, 31]; got ${J
 if (!token) UNKNOWN('CFQ_TOKEN is not set; cannot measure quota');
 if (!accountId) UNKNOWN('CFQ_ACCOUNT_ID is not set');
 
-const now = new Date();
+// `CFQ_NOW` は**テスト用の時刻上書き**（ISO8601）。月初にしか現れない挙動（観測窓が経過日数で
+// 頭打ちになる件）を任意の日で検証するために置いてある。**本番では設定しない**——設定すると
+// checked_at も含めて全ての判定がその時刻基準になる。
+const now = process.env.CFQ_NOW ? new Date(process.env.CFQ_NOW) : new Date();
+if (Number.isNaN(now.getTime())) UNKNOWN('CFQ_NOW is not a valid date');
 const monthPrefix = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
 // 月末までの残日数（当日を含む）。月枠は暦月でリセットされる前提。
 const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
 const daysLeft = Math.max(1, daysInMonth - now.getUTCDate() + 1);
 const rateWindowStart = new Date(now.getTime() - rateDays.value * 86400_000);
+// **窓は「実際に観測できた長さ」で割る**（MUST）。当月のレコードしか数えないので、月初は窓 7 日ぶんの
+// データが存在しない。それでも 7 で割ると**レートを実際より小さく見積もり、`ok` を出しすぎる**
+// （例: 1日目に 60 ビルドでも 60/7≒8.6件/日 と誤読して余裕があると判断する）。
+const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+const daysElapsed = (now.getTime() - monthStart) / 86400_000; // 小数（月初1時間なら 0.04）
+const observedDays = Math.max(1 / 24, Math.min(rateDays.value, daysElapsed));
 
 const inThisMonth = (iso) => typeof iso === 'string' && iso.startsWith(monthPrefix);
 const parseTs = (iso) => {
@@ -123,8 +134,10 @@ function classify(used, limit, recentAmount) {
   if (used >= limit) return { state: 'exhausted', note: 'monthly allowance is used up' };
   const pct = (used / limit) * 100;
   if (pct >= threshold.value) return { state: 'tight', note: 'usage ratio is at or above threshold' };
-  // 直近レートで月末まで持つか（設定変更で不連続に変わるので、平均ではなく直近窓を使う）
-  const perDay = recentAmount / rateDays.value;
+  // 直近レートで月末まで持つか（設定変更で不連続に変わるので、平均ではなく直近窓を使う）。
+  // 割るのは observedDays（窓と経過日数の小さいほう）——月初に窓ぶんのデータが無いのに窓長で割ると
+  // レートを過小評価して ok を出しすぎる。
+  const perDay = recentAmount / observedDays;
   const projected = used + perDay * daysLeft;
   if (projected >= limit) return { state: 'tight', note: 'projected to exceed the allowance before the month resets' };
   return { state: 'ok', note: 'within allowance and projected to stay within it' };
