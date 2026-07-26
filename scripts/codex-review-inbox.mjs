@@ -65,27 +65,36 @@ if (!token || !outPath || repos.length === 0) {
 
 const cutoff = new Date(Date.now() - lookbackDays * 24 * 3600 * 1000);
 
+const PR_FIELDS = `
+  number url title state merged updatedAt
+  reviewThreads(first:50){
+    pageInfo{ hasNextPage }
+    nodes{
+      isResolved isOutdated
+      comments(first:1){
+        nodes{ author{ login } createdAt url path body }
+      }
+    }
+  }`;
+
 const QUERY = `
 query($owner:String!,$name:String!){
   repository(owner:$owner,name:$name){
     pullRequests(first:50, orderBy:{field:UPDATED_AT,direction:DESC}){
-      nodes{
-        number url title state merged updatedAt
-        reviewThreads(first:50){
-          pageInfo{ hasNextPage }
-          nodes{
-            isResolved isOutdated
-            comments(first:1){
-              nodes{ author{ login } createdAt url path body }
-            }
-          }
-        }
-      }
+      nodes{${PR_FIELDS}}
     }
   }
 }`;
 
-async function graphql(owner, name) {
+// 直近スキャンの窓から外れた PR を名指しで再確認するためのクエリ（下記「持ち越し」）。
+const PR_QUERY = `
+query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){${PR_FIELDS}}
+  }
+}`;
+
+async function graphql(query, variables) {
   const res = await fetch(GRAPHQL, {
     method: 'POST',
     headers: {
@@ -93,7 +102,7 @@ async function graphql(owner, name) {
       'content-type': 'application/json',
       'user-agent': 'ops-sync-codex-review-inbox',
     },
-    body: JSON.stringify({ query: QUERY, variables: { owner, name } }),
+    body: JSON.stringify({ query, variables }),
   });
   if (!res.ok) throw new Error(`http ${res.status}`);
   const json = await res.json();
@@ -119,16 +128,62 @@ function daysAgo(iso) {
 const findings = [];
 const failures = [];
 const truncated = [];
+const seenPrs = new Set(); // "owner/repo#number" — この run で実際に確認できた PR
+
+// **持ち越し（durability）**: 直近スキャンは「最近更新された PR」しか見ない。未 resolve のスレッドが
+// 載った PR がその窓から外れると、resolve されていないのに一覧から**黙って消える**——この一覧が防ぐ
+// はずの fail-open そのものになる。そこで前回の一覧に載っていた PR を読み戻し、窓の外にあっても
+// **GraphQL が resolve 済みと答えるまで**名指しで再確認する（消える条件を「古くなったから」ではなく
+// 「resolve された（または PR ごと消えた）から」に固定する）。
+// コストは「未対応の指摘を持つ PR の数」に比例して有界（実測: 数十件）。
+function loadCarriedPrs(path) {
+  if (!existsSync(path)) return [];
+  const out = new Map();
+  for (const m of readFileSync(path, 'utf8').matchAll(
+    /https:\/\/github\.com\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/pull\/(\d+)/g,
+  )) {
+    const repo = `${m[1]}/${m[2]}`;
+    const number = Number(m[3]);
+    out.set(`${repo}#${number}`, { repo, number });
+  }
+  return [...out.values()];
+}
+
+// 1つの PR ノードから未 resolve な Codex 指摘を取り出す
+function collectFromPr(repo, pr) {
+  if (!pr) return 0;
+  seenPrs.add(`${repo}#${pr.number}`);
+  if (pr.reviewThreads?.pageInfo?.hasNextPage) truncated.push(`${repo}#${pr.number}`);
+  let found = 0;
+  for (const th of pr.reviewThreads?.nodes || []) {
+    if (!th || th.isResolved) continue;
+    const c = th.comments?.nodes?.[0];
+    if (!c || c.author?.login !== bot) continue;
+    const { priority, title } = parseFinding(c.body || '');
+    findings.push({
+      repo,
+      pr: pr.number,
+      prMerged: pr.merged,
+      prState: pr.state,
+      priority,
+      title,
+      path: c.path || '',
+      url: c.url,
+      createdAt: c.createdAt,
+      isOutdated: th.isOutdated,
+    });
+    found++;
+  }
+  return found;
+}
+
+const carried = loadCarriedPrs(outPath);
 
 for (const repo of repos) {
   const [owner, name] = repo.split('/');
-  if (!owner || !name) {
-    failures.push({ repo, reason: 'invalid repo spec' });
-    continue;
-  }
   let data;
   try {
-    data = await graphql(owner, name);
+    data = await graphql(QUERY, { owner, name });
   } catch (err) {
     failures.push({ repo, reason: String(err.message || err) });
     console.log(`repo=${repo} status=error`);
@@ -141,28 +196,30 @@ for (const repo of repos) {
     if (!pr) continue;
     if (new Date(pr.updatedAt) < cutoff) break; // UPDATED_AT desc なのでここから先は全部古い
     scanned++;
-    if (pr.reviewThreads?.pageInfo?.hasNextPage) truncated.push(`${repo}#${pr.number}`);
-    for (const th of pr.reviewThreads?.nodes || []) {
-      if (!th || th.isResolved) continue;
-      const c = th.comments?.nodes?.[0];
-      if (!c || c.author?.login !== bot) continue;
-      const { priority, title } = parseFinding(c.body || '');
-      findings.push({
-        repo,
-        pr: pr.number,
-        prMerged: pr.merged,
-        prState: pr.state,
-        priority,
-        title,
-        path: c.path || '',
-        url: c.url,
-        createdAt: c.createdAt,
-        isOutdated: th.isOutdated,
-      });
-      found++;
-    }
+    found += collectFromPr(repo, pr);
   }
   console.log(`repo=${repo} status=ok prs_scanned=${scanned} open_findings=${found}`);
+}
+
+// 前回載っていて今回のスキャン窓から外れた PR を名指しで再確認する
+let carriedChecked = 0;
+let carriedFound = 0;
+for (const { repo, number } of carried) {
+  if (seenPrs.has(`${repo}#${number}`)) continue;
+  const [owner, name] = repo.split('/');
+  let data;
+  try {
+    data = await graphql(PR_QUERY, { owner, name, number });
+  } catch (err) {
+    // **落ちたら消さない**。読めなかった PR を黙って落とすと持ち越しの意味が無くなる。
+    failures.push({ repo: `${repo}#${number}`, reason: `carried-over: ${String(err.message || err)}` });
+    continue;
+  }
+  carriedChecked++;
+  carriedFound += collectFromPr(repo, data.pullRequest);
+}
+if (carriedChecked || carried.length) {
+  console.log(`carried_over prs_rechecked=${carriedChecked} open_findings=${carriedFound}`);
 }
 
 // 並びを決定的にする（毎 run 同じ内容なら同じバイト列になり、無駄なコミットが立たない）。
@@ -238,7 +295,11 @@ if (findings.length === 0) {
 
 lines.push('---');
 lines.push('');
-lines.push(`走査対象: ${repos.map((r) => `\`${r}\``).join(' / ')}（直近 ${lookbackDays} 日に更新された PR）`);
+lines.push(
+  `走査対象: ${repos.map((r) => `\`${r}\``).join(' / ')}。直近 ${lookbackDays} 日に更新された PR に加え、` +
+    '**前回この一覧に載っていた PR は窓の外でも名指しで再確認する**' +
+    '（＝古くなったからではなく、resolve されたから消える）。',
+);
 if (truncated.length) {
   lines.push('');
   lines.push(`> 注: 次の PR はレビュースレッドが多く、一部を読み切れていない: ${truncated.join(', ')}`);
