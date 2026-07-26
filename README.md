@@ -44,6 +44,8 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 | `scripts/apply-common.mjs` | （下り）consumer の AGENTS.md のマーカー区間へ反映（無ければ追記） |
 | `scripts/apply-entrypoints.mjs` | （下り）consumer に `CLAUDE.md` / `GEMINI.md` → `AGENTS.md` の入口 symlink を配線 |
 | `scripts/apply-shared.mjs` | （下り）`shared/**`・`tasks/**` の配置（正本の実行ビットを保持）と、manifest 差分による削除の伝播、skill ミラーの自動生成 |
+| `shared/scripts/new-task-history.mjs` | （下り）時刻＋ランダムIDで衝突しないタスク履歴フラグメントを排他的に新規作成する共通スクリプト |
+| `scripts/new-task-history.mjs` | ops-sync自身が上記正本をconsumerと同じパスで使うためのsymlink |
 | `.github/workflows/sync.yml` | （下り）変更時＋cron（1日1回の再適用＝手編集ドリフトの自己修復）で各 consumer へ同期PRを自動生成（MERGE_MODE で自動マージ可） |
 | `scripts/collect-outbox.mjs` | （上り）consumer の `.ops-sync/outbox/*.md` 提案を種別に応じて反映（1 consumer 分をまとめて処理・不正な提案は `rejected/` へ差し戻し） |
 | `.github/workflows/collect-outbox.yml` | （上り）cron（約6時間ごと）＋手動で提案を拾い、取り込みPR＋掃除PRを生成。あわせてトゥームストーン掃除 |
@@ -129,7 +131,8 @@ consumer 側のセットアップは**不要**（workflow・Secret とも置か�
   （consumer 起点なら outbox の `種別: task`）。詳細は `shared/docs/cross-repo-tasks.md`。
 - **consumer を増やす**: `consumers.txt` に追記し、PAT のアクセス対象にもそのリポジトリを追加する。
 - **タスク履歴の統合・アーカイブ**: 自動。エージェントは履歴を本体に直接書かず、1エントリ＝1ファイルで
-  `docs/history-inbox/`（→ `shared/docs/task-history.md`）に置く（並行 PR のコンフリクト回避）。
+  `scripts/new-task-history.mjs <タスクスラッグ> "<短いタイトル>"` を実行し、時刻＋ランダムIDのファイルを
+  `docs/history-inbox/`（→ `shared/docs/task-history.md`）に置く（並行PRのコンフリクト回避）。
   *Archive task histories* workflow（cron 1日1回）が ops-sync と全 consumer を巡回し、フラグメントを
   `docs/AI_TASK_HISTORY.md` へ統合＋保持量（直近2作業日分）超過分をアーカイブする PR を自動マージする。
   統合時、本体に既にある同一本文のエントリは取り込まず、そのフラグメントは削除して掃除する（重複記録の防止）。

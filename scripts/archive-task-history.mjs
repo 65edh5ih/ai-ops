@@ -1,8 +1,8 @@
 // タスク履歴の保守バッチ（consolidate + archive）。規約は shared/docs/task-history.md。
 //
 // エージェントは履歴を docs/AI_TASK_HISTORY.md へ直接追記せず、1エントリ＝1ファイルで
-// docs/history-inbox/<YYYY-MM-DD>-<スラッグ>.md に置く（並行 PR が同じ行に触れずコンフリクトを
-// 避けるため＝towncrier 型のフラグメント）。このバッチが:
+// scripts/new-task-history.mjs で docs/history-inbox/ に一意なファイルとして置く
+// （並行 PR が同じ行に触れずコンフリクトを避けるため＝towncrier 型のフラグメント）。このバッチが:
 //   1. docs/history-inbox/ の全フラグメントを docs/AI_TASK_HISTORY.md へ取り込み（新しい日付が上）、
 //      取り込んだフラグメントファイルを削除する（consolidate）。
 //   2. 取り込み後、本体に残すのは「エントリのある日付で数えて直近2作業日分」。超過した古い日付の
