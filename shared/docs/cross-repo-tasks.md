@@ -4,9 +4,10 @@
 必要になったとき**の依頼経路。1セッション=1リポジトリの制約下で、依頼を ops-sync 経由で対象リポジトリの
 手元（`.ops-sync/tasks/`）まで物理的に届ける。Notion 等の外部ツールへの転記は不要。
 
-経路: 依頼元の `.ops-sync/outbox/`（`種別: task`）→ ops-sync の `tasks/<owner>/<repo>/` → sync で
+経路: 依頼元から `種別: task` を ops-sync へ出す（正本への直接 PR か `.ops-sync/outbox/` 提案。選び方は
+[`docs/outbox-proposal.md`](outbox-proposal.md)）→ ops-sync の `tasks/<owner>/<repo>/` → sync で
 対象リポジトリの `.ops-sync/tasks/` へ配布 → 対象リポジトリのセッションが実行 → `種別: task-done` で消化。
-途中に取り込み PR（ops-sync）と同期 PR（対象）が挟まり、**オーナーが2回マージして初めて届く**＝届いている
+途中に ops-sync 側の PR と同期 PR（対象）が挟まり、**オーナーが2回マージして初めて届く**＝届いている
 タスクは承認済みとみなしてよい。
 
 ## 依頼する側（タスクを書くとき）
@@ -19,9 +20,9 @@
 3. **完了条件**: 何ができたら終わりか。
 4. 分かるなら対象リポジトリ側の関連パス・注意点。
 
-依頼を outbox に置いたら（書式: [`docs/outbox-proposal.md`](outbox-proposal.md)）、**ユーザーに次を伝える**:
+依頼を出したら（経路と書式: [`docs/outbox-proposal.md`](outbox-proposal.md)）、**ユーザーに次を伝える**:
 
-- 「ops-sync の取り込み PR → 対象リポジトリの同期 PR の順にマージされると届きます」
+- 「ops-sync 側の PR → 対象リポジトリの同期 PR の順にマージされると届きます」
 - **対象リポジトリのセッションに貼るコピペ用の指示文**（1つずつ・冒頭に1行の概要。Claude Code は
   最初の入力からセッションタイトルを生成するため）:
 
@@ -42,5 +43,6 @@
 ## ops-sync 側でできること
 
 ops-sync のセッション（またはオーナー）は、`tasks/<owner>/<repo>/` にファイルを直接コミット／削除して
-起票・消化できる（outbox を経由するのは consumer のセッションだけ）。ops-sync 自身への依頼はタスク機構を
+起票・消化できる（consumer のセッションが直接コミットすることはなく、正本への PR か outbox 提案を
+経由する。→ `docs/outbox-proposal.md`）。ops-sync 自身への依頼はタスク機構を
 使わず、ユーザーが ops-sync のセッションに直接指示する。

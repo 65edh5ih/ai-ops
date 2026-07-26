@@ -23,8 +23,10 @@
 
 - **下り（配布）**: ops-sync → 全 consumer。ops-sync の main に入ると各 consumer に同期 PR が立つ。
   **内容のレビューは ops-sync のマージ時に済んでいる**ので、同期 PR は自動マージしてよい（下記 MERGE_MODE）。
-- **上り（提案）**: consumer → ops-sync。consumer のエージェントは `.ops-sync/outbox/` に「提案」を置くだけで、
-  正本を直接書き換えない。取り込みは ops-sync 側の1回の人間レビュー付きマージに集約。
+- **上り（提案）**: consumer → ops-sync。consumer のエージェントは**配布された複製を書き換えず、正本のある
+  ops-sync 側へ変更を出す**。出し方は2通り——ops-sync をセッションに追加できるなら正本へ直接 PR、できなければ
+  `.ops-sync/outbox/` に「提案」を置いて collect に取り込ませる（→ `docs/outbox-proposal.md`）。どちらでも
+  正本に入るのは ops-sync 側の1回の人間レビュー付きマージで、エージェントは自分でマージしない。
 
 | ファイル | 唯一の書き手 |
 |---|---|
@@ -307,7 +309,8 @@ orphan 再構築すると quota 信号や archive ログの経緯まで巻き込
   分数節約のため（public repo の GitHub-hosted runner は無料で、運用 workflow・エージェント起点の計算とも
   アカウント枠を消費しない）。帰結:
   - ops-sync に置く一切（git 履歴・outbox 取り込み結果・shared 配布物）は**世界公開**。secret・consumer の
-    内部情報（インフラ機密等）を ops-sync に置かない。outbox 提案に private repo の中身を貼らない。
+    内部情報（インフラ機密等）を ops-sync に置かない。上りで出す内容（outbox 提案・正本への直接 PR の
+    どちらも）に private repo の中身を貼らない。
   - 唯一の機微は `OPS_SYNC_TOKEN`（下記）だが Actions secret なので**可視性変更では露出しない**。かつ
     ops-sync の workflow はどれも `pull_request` では起動しないため、fork PR からトークンを窃取する経路が
     構造的に無い。合鍵保護として **main のブランチ保護**（無料アカウントでは public でのみ enforced。
