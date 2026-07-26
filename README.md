@@ -40,7 +40,7 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 | `shared/**` | （下り）consumer へ配布する実ファイル・共通 doc。consumer のパスをミラー |
 | `tasks/<owner>/<repo>/` | （下り）その consumer 宛のリポジトリ横断タスク（→ `shared/docs/cross-repo-tasks.md`） |
 | `sync-deletions.txt` | （下り）consumer から撤去する unmanaged ファイルの一覧 |
-| `consumers.txt` | 配布先リポジトリ（`owner/repo` を1行ずつ） |
+| `consumers.txt` | 配布先リポジトリ（`owner/repo` を1行ずつ）。作業リポジトリ（private）に加え、計算基盤 `ops-runner`（public）もここに載る |
 | `scripts/apply-common.mjs` | （下り）consumer の AGENTS.md のマーカー区間へ反映（無ければ追記） |
 | `scripts/apply-entrypoints.mjs` | （下り）consumer に `CLAUDE.md` / `GEMINI.md` → `AGENTS.md` の入口 symlink を配線 |
 | `scripts/apply-shared.mjs` | （下り）`shared/**`・`tasks/**` の配置（正本の実行ビットを保持）と、manifest 差分による削除の伝播、skill ミラーの自動生成 |
@@ -54,6 +54,22 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 | `.github/workflows/actions-quota.yml` | （信号）cron（6時間ごと）で上記を実行し `ci-logs` の `quota/actions/actions.json` へ publish。エージェントが private repo で workflow を回してよいかの判断に使う（手順: `shared/docs/actions-quota.md`） |
 | `scripts/cloudflare-quota.mjs` | （信号）CF の月枠（Pages のビルド回数・Workers Builds の分数）を測り、使用率と**直近レートによる月末予測**の両方で band を出す |
 | `.github/workflows/cloudflare-quota.yml` | （信号）cron（6時間ごと）で上記を実行し `ci-logs` の `quota/cloudflare/cloudflare.json` へ publish。GitHub 枠の逼迫時に「CF へ退避してよいか」の判断に使う |
+
+## 実行基盤（ops-runner）
+
+**エージェントが dispatch する計算は ai-ops では動かさない。** 専用の consumer
+**`65edh5ih/ops-runner`（public）**で動かす。現状の対象は net-fetch（集約モード）で、
+その workflow・allowlist・共通ルールは通常の配布でここへ届く（runner 側に固有の配線は無い）。
+
+- **境界の判定は「`OPS_SYNC_TOKEN` が要るか」**。要るもの（sync / collect-outbox / archive /
+  branch-cleanup）と、外部入力を取らない cron（quota 信号）は ai-ops。エージェントが任意に起動し、
+  外部 URL の中身を持ち込むものは ops-runner。→ `shared/docs/ops-sync-design.md`「実行基盤の分離」
+- **ops-runner は public 必須**。無料枠で回すため（private だとアカウント単位の Actions 枠を消費する）。
+  帰結として、配布物も net-fetch の取得結果も**世界公開**になる。機微を取得しうるものは集約モードに
+  流さない（分散モード＝作業中の private リポジトリで実行する。→ `shared/docs/net-fetch.md`）。
+- **ops-runner に secret を置かない**（`github.token` のみ）。これが分離の目的そのもの。
+- 集約モードの dispatch 先・結果の読み戻し先はどちらも ops-runner。ただし **allowlist の正本は ai-ops の
+  `shared/.github/net-allowlist.txt`**、**Actions 月枠の信号は ai-ops の `ci-logs`** で、これらは移っていない。
 
 ## セットアップ（1回だけ）
 
