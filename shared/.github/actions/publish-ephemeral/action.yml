@@ -123,14 +123,15 @@ runs:
               fi
             done < <(find "${tmp}/${SLICE_ROOT}" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
           fi
-          while IFS= read -r -d '' marker; do
-            dir="$(dirname "$marker")"
+          while IFS= read -r -d '' dir; do
+            marker="${dir}/.published-at"
+            [ -f "$marker" ] || continue
             ts="$(head -c 32 "$marker" 2>/dev/null | tr -dc '0-9')"
             if [ -z "$ts" ] || [ "$ts" -lt "$cutoff" ]; then
               echo "publish-ephemeral: expiring $(basename "$dir")"
               rm -rf "$dir"
             fi
-          done < <(find "$tmp" -name .published-at -not -path "${tmp}/.git/*" -print0 2>/dev/null)
+          done < <(find "${tmp}/${SLICE_ROOT}" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
 
           # ── write our own slice ──────────────────────────────────────────
           if [ "$PRUNE_ONLY" != "true" ]; then

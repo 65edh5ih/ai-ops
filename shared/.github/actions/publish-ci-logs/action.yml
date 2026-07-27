@@ -78,18 +78,9 @@ runs:
         git -C "$tmp" config user.name "github-actions[bot]"
         git -C "$tmp" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-        # ── latest (backward compat) ─────────────────────────────────────────
-        rm -rf "${tmp:?}/${DEST}"
-        mkdir -p "${tmp}/${DEST}"
-        cp -a "${src_abs}/." "${tmp}/${DEST}/"
-
-        # ── history (optional per-run snapshot + age-based pruning) ──────────
-        if [ -n "${HISTORY_DIR}" ]; then
-          ts="$(date -u +'%Y%m%d-%H%M%S')"
-          entry="${ts}${RUN_ID:+-${RUN_ID}}"
-          mkdir -p "${tmp}/${HISTORY_DIR}/${entry}"
-          cp -a "${src_abs}/." "${tmp}/${HISTORY_DIR}/${entry}/"
-
+        prune_history() {
+          [ -n "${HISTORY_DIR}" ] || return 0
+          local retention cutoff dir base dir_date
           retention="${RETENTION_DAYS:-30}"
           if [ "$retention" -gt 0 ] && [ -d "${tmp}/${HISTORY_DIR}" ]; then
             cutoff="$(date -u -d "${retention} days ago" +'%Y%m%d')"
@@ -103,6 +94,21 @@ runs:
               fi
             done < <(find "${tmp}/${HISTORY_DIR}" -maxdepth 1 -mindepth 1 -type d -print0 2>/dev/null)
           fi
+        }
+
+        # ── latest (backward compat) ─────────────────────────────────────────
+        rm -rf "${tmp:?}/${DEST}"
+        mkdir -p "${tmp}/${DEST}"
+        cp -a "${src_abs}/." "${tmp}/${DEST}/"
+
+        # ── history (optional per-run snapshot + age-based pruning) ──────────
+        if [ -n "${HISTORY_DIR}" ]; then
+          ts="$(date -u +'%Y%m%d-%H%M%S')"
+          entry="${ts}${RUN_ID:+-${RUN_ID}}"
+          mkdir -p "${tmp}/${HISTORY_DIR}/${entry}"
+          cp -a "${src_abs}/." "${tmp}/${HISTORY_DIR}/${entry}/"
+
+          prune_history
         fi
 
         git -C "$tmp" add -A
@@ -131,6 +137,9 @@ runs:
               if [ -n "${HISTORY_DIR}" ]; then
                 mkdir -p "${tmp}/${HISTORY_DIR}/${entry}"
                 cp -a "${src_abs}/." "${tmp}/${HISTORY_DIR}/${entry}/"
+                # reset --hard restored concurrent history, including entries that
+                # have crossed the retention cutoff since our first build.
+                prune_history
               fi
               git -C "$tmp" add -A
               if git -C "$tmp" diff --cached --quiet; then

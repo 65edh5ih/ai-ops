@@ -90,6 +90,19 @@ matches_secret() {
 SAFE_URL="$(redact_secrets "$URL")"
 # request_id も出力（meta.txt・ジョブログ・publish 先パス）に出るので、URL と同じ基準で伏字する。
 SAFE_REQUEST_ID="$(redact_secrets "$REQUEST_ID")"
+# Metadata and logs are line-oriented. Redact control characters before any export so
+# an invalid multiline ID cannot forge adjacent fields or log records.
+SAFE_REQUEST_ID="${SAFE_REQUEST_ID//$'\r'/[REDACTED-CR]}"
+SAFE_REQUEST_ID="${SAFE_REQUEST_ID//$'\n'/[REDACTED-LF]}"
+
+valid_request_id() {
+  # grep の ^/$ は改行ごとに一致するため、複数行の一部だけが正しくても通し得る。
+  # shell の pattern で値全体を検査し、改行を含む入力を確実に拒否する。
+  case "$1" in
+    ''|*[!A-Za-z0-9._-]*|*..*) return 1 ;;
+  esac
+  ! matches_secret "$1"
+}
 
 # request_id は結果スライスのパス素材にもなる（publish の dest = net-fetch/<id>）。.. や / を含むと
 # 意図した net-fetch/<id> スライスの外へ publish される（path traversal）。検証を通らない id は
@@ -97,9 +110,7 @@ SAFE_REQUEST_ID="$(redact_secrets "$REQUEST_ID")"
 # **secret 形の id を弾く**（MUST）: token 類は `^[A-Za-z0-9._-]+$` を素通りするため（例 ghp_xxx）、
 # 文字種検査だけだと request_id に貼られた secret が publish 先パス・meta.txt・ジョブログに残る。
 # public な実行先（ops-runner）では世界公開に落ちるので、URL と同じ secret 判定を通す。
-if printf '%s' "$REQUEST_ID" | grep -Eq '^[A-Za-z0-9._-]+$' \
-   && ! printf '%s' "$REQUEST_ID" | grep -q '\.\.' \
-   && ! matches_secret "$REQUEST_ID"; then
+if valid_request_id "$REQUEST_ID"; then
   id_safe="$REQUEST_ID"
 else
   id_safe="_invalid-$(date -u +%Y%m%d-%H%M%S)-$$"
@@ -125,7 +136,15 @@ emit() {
       echo "http_status=$http_status"
       echo "result_dir=$OUTPUT_DIR"
       echo "dest=$DEST"
-      echo "safe_request_id=$SAFE_REQUEST_ID"
+      # Invalid IDs may contain newlines. Use the multiline output protocol so no
+      # attacker-controlled line can be interpreted as another workflow output.
+      delimiter="__NET_FETCH_$(date -u +%s)_$$_${RANDOM}__"
+      while printf '%s\n' "$SAFE_REQUEST_ID" | grep -Fqx "$delimiter"; do
+        delimiter="${delimiter}_${RANDOM}"
+      done
+      echo "safe_request_id<<$delimiter"
+      printf '%s\n' "$SAFE_REQUEST_ID"
+      echo "$delimiter"
     } >> "$GITHUB_OUTPUT"
   fi
   echo "net-fetch: status=$status http=$http_status reason=${reason:-none} id=$SAFE_REQUEST_ID"
@@ -141,9 +160,7 @@ fail()   { status="error";    reason="$1"; emit; }
 
 # ── 入力検証 ───────────────────────────────────────────────
 [ -n "$URL" ] || fail "empty url"
-{ printf '%s' "$REQUEST_ID" | grep -Eq '^[A-Za-z0-9._-]+$' \
-  && ! printf '%s' "$REQUEST_ID" | grep -q '\.\.' \
-  && ! matches_secret "$REQUEST_ID"; } \
+valid_request_id "$REQUEST_ID" \
   || fail "invalid request_id (allowed: A-Za-z0-9._- , must not contain '..' , must not look like a secret)"
 case "$METHOD" in GET|HEAD) : ;; *) reject "method not allowed (GET/HEAD only): $METHOD" ;; esac
 
