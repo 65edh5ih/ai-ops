@@ -299,7 +299,8 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
   全リポジトリで同じパスなので、共通ブロックの発火トリガを「このリポジトリの `.ops-sync/codex-review-inbox.md`
   を読め」の1文に固定できる（private consumer のセッションでは自分の積み残しを自力で読める）。public の
   `ops-sync` / `ops-runner` は走査対象には残すが、スライスを書かず private の全体一覧だけに載せる。
-  切り替え前に public repo へ publish 済みのスライスがあれば、workflow が明示的に削除して公開状態を残さない。
+  切り替え前に public repo へ publish 済みだったスライスは、main 保護を迂回する workflow の直接 push ではなく、
+  各 public repo の通常の削除 PR で撤去した。以後 workflow は public repo を書き込み先に含めないため再生成しない。
 
 置き場をこう分ける理由は2つ:
 
