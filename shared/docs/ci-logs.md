@@ -32,7 +32,7 @@ slice 単位で publish する。このための composite action `.github/actio
 2. スクリプトログを `logs/ci/scripts/<name>.log` へ出す（`2>&1 | tee`）。
 3. ジョブ末尾に「Stage CI log snapshot」と「Publish logs to ci-logs branch」
    (`uses: ./.github/actions/publish-ci-logs`) の2ステップを `if: always()` で足す（＝この inline 公開は
-   成功・失敗を問わず常時）。**手順3は例外なく全ワークフローで必須**。
+   成功・失敗を問わず常時）。**手順3は例外なく全ワークフローで実施する（MUST）**。
    - 完了条件: 成功 run・失敗 run のどちらでも `ci-logs` に当該 slice が作られる。
 4. リポジトリにフル生ログ collector があるなら、その `workflows` リストにワークフロー名を登録する。
    **collector は失敗時のみ回収する（MUST）**——ジョブの `if:` を
@@ -55,11 +55,11 @@ slice 単位で publish する。このための composite action `.github/actio
 
 ## 手順B: CI 失敗の切り分け（ログを読み始める前に）
 
-1. **その run でジョブが1つでも起動したかを見る**（ジョブ一覧の件数と、run の usage の `billable`）。
-   - 完了条件: 「ジョブが走った」か「ジョブ0件・課金0分」かが確定している。
+1. **その run でジョブが1つでも起動したかをジョブ一覧で確認する**。
+   - 完了条件: 「ジョブが走った」か「ジョブ0件」かが確定している。
 2. **ジョブが走っていれば**、通常どおりログを読む（inline slice → 失敗なら collector のフル生ログ）。
-3. **ジョブ0件・課金0分だった場合**は、**run のページ（または run/check の annotation）に出ている文言を
-   必ず読む**（MUST）。ジョブが起動していない原因は少なくとも3種類あり、**ジョブ数と課金だけでは区別
+3. **ジョブ0件だった場合**は、**run のページ（または run/check の annotation）に出ている文言を
+   必ず読む**（MUST）。ジョブが起動していない原因は少なくとも3種類あり、**ジョブ数だけでは区別
    できない**（MUST NOT: 件数だけで原因を断定する）:
 
    | run ページの文言 | 原因 | 対処 |
