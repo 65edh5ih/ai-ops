@@ -28,8 +28,8 @@ slice 単位で publish する。このための composite action `.github/actio
 
 ## 手順A: 新規ワークフローに CI ログ出力を組み込む
 
-1. ジョブに `permissions: contents: write` を付ける。
-2. スクリプトログを `logs/ci/scripts/<name>.log` へ出す（`2>&1 | tee`）。
+1. ジョブに `permissions: contents: write` を付ける（MUST）。
+2. スクリプトログを `logs/ci/scripts/<name>.log` へ出す（`2>&1 | tee`）（MUST）。
 3. ジョブ末尾に「Stage CI log snapshot」と「Publish logs to ci-logs branch」
    (`uses: ./.github/actions/publish-ci-logs`) の2ステップを `if: always()` で足す（＝この inline 公開は
    成功・失敗を問わず常時）。**手順3は例外なく全ワークフローで実施する（MUST）**。
