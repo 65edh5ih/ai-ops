@@ -95,13 +95,16 @@ SAFE_REQUEST_ID="$(redact_secrets "$REQUEST_ID")"
 SAFE_REQUEST_ID="${SAFE_REQUEST_ID//$'\r'/[REDACTED-CR]}"
 SAFE_REQUEST_ID="${SAFE_REQUEST_ID//$'\n'/[REDACTED-LF]}"
 
-valid_request_id() {
+structurally_valid_request_id() {
   # grep の ^/$ は改行ごとに一致するため、複数行の一部だけが正しくても通し得る。
   # shell の pattern で値全体を検査し、改行を含む入力を確実に拒否する。
   case "$1" in
     ''|*[!A-Za-z0-9._-]*|*..*) return 1 ;;
   esac
-  ! matches_secret "$1"
+}
+
+valid_request_id() {
+  structurally_valid_request_id "$1" && ! matches_secret "$1"
 }
 
 # request_id は結果スライスのパス素材にもなる（publish の dest = net-fetch/<id>）。.. や / を含むと
@@ -160,8 +163,10 @@ fail()   { status="error";    reason="$1"; emit; }
 
 # ── 入力検証 ───────────────────────────────────────────────
 [ -n "$URL" ] || fail "empty url"
-valid_request_id "$REQUEST_ID" \
-  || fail "invalid request_id (allowed: A-Za-z0-9._- , must not contain '..' , must not look like a secret)"
+structurally_valid_request_id "$REQUEST_ID" \
+  || fail "invalid request_id (allowed: A-Za-z0-9._- and must not contain '..')"
+matches_secret "$REQUEST_ID" \
+  && reject "request_id appears to contain a secret; refusing to publish it"
 case "$METHOD" in GET|HEAD) : ;; *) reject "method not allowed (GET/HEAD only): $METHOD" ;; esac
 
 # scheme は https のみ
