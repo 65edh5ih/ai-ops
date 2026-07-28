@@ -298,6 +298,7 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
   全リポジトリで同じパスなので、共通ブロックの発火トリガを「このリポジトリの `.ops-sync/codex-review-inbox.md`
   を読め」の1文に固定できる（private consumer のセッションでは自分の積み残しを自力で読める）。public の
   `ops-sync` / `ops-runner` は走査対象には残すが、スライスを書かず private の全体一覧だけに載せる。
+  切り替え前に public repo へ publish 済みのスライスがあれば、workflow が明示的に削除して公開状態を残さない。
 
 置き場をこう分ける理由は2つ:
 
@@ -348,8 +349,9 @@ CI が生む出力には性質の違う2種類があり、**同じブランチ�
   `publish-ephemeral`。毎回 orphan 1コミットへ書き換えるので**履歴に堆積せず**、TTL（既定3日）で失効する。
 
 `publish-ephemeral` の retention は、`slice-root`（既定 `net-fetch`）直下をスライス境界として扱う。
-各スライスには action が `.published-at` を書き、期限切れに加えて、marker が無い・読めないスライスも
-年齢を安全に証明できないため削除する（fail closed）。scheduled sweep は最後のスライスが消えた場合も
+action が直接管理する各スライスには `.published-at` を書き、`slice-root` 直下のディレクトリだけを走査して、
+marker を読めて期限切れと判定できたスライスを削除する。marker が無いディレクトリは action の管理対象と
+証明できないため削除しない。scheduled sweep は最後のスライスが消えた場合も
 空 tree の orphan commit を publish し、揮発ブランチ上に期限切れデータを残さない。
 
 分けた理由は、**git ブランチでは削除が削除にならない**こと。`ci-logs` からファイルを消しても内容は履歴に
