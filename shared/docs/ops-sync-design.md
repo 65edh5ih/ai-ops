@@ -349,9 +349,9 @@ CI が生む出力には性質の違う2種類があり、**同じブランチ�
   `publish-ephemeral`。毎回 orphan 1コミットへ書き換えるので**履歴に堆積せず**、TTL（既定3日）で失効する。
 
 `publish-ephemeral` の retention は、`slice-root`（既定 `net-fetch`）直下をスライス境界として扱う。
-action が直接管理する各スライスには `.published-at` を書き、`slice-root` 直下のディレクトリだけを走査して、
-marker を読めて期限切れと判定できたスライスを削除する。marker が無いディレクトリは action の管理対象と
-証明できないため削除しない。scheduled sweep は最後のスライスが消えた場合も
+action が直接管理する各スライスには `.published-at` を書き、`slice-root` 直下のディレクトリだけを走査する。
+marker を読めて期限切れと判定できたスライスに加え、marker が無い／読めない直下スライスも保持期限を
+証明できないため fail-closed で削除する。scheduled sweep は最後のスライスが消えた場合も
 空 tree の orphan commit を publish し、揮発ブランチ上に期限切れデータを残さない。
 
 分けた理由は、**git ブランチでは削除が削除にならない**こと。`ci-logs` からファイルを消しても内容は履歴に
