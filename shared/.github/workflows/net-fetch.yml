@@ -56,6 +56,11 @@ on:
   # スライスが日曜の掃除では未達（2日）で次の日曜まで残り、3日 TTL のはずが実質9日公開され続ける
   # （集約モードは public なので、これは「広告した保持期間より長く世界公開する」ことになる）。
   # 日次なら最大でも TTL + 1日に収まる。コストは1 run 数十秒＝課金は最小単位の1分/日。
+  #
+  # ただしこの日次実行は public リポジトリでだけ走る（sweep ジョブの `if` を見よ）。上の理由は
+  # 「TTL を超えて世界公開する時間を最小化する」ことなので、結果が非公開な private リポジトリでは
+  # 便益が発生しない一方、Actions 分数だけはアカウント枠に課金される。private では掃除を
+  # 「次の取得」に寄せて枠を一切使わない。
   schedule:
     - cron: '17 4 * * *'
 
@@ -171,7 +176,10 @@ jobs:
 
   # 休眠中の掃除専用。取得はせず、TTL を過ぎたスライスを落とすだけ。
   sweep:
-    if: github.event_name == 'schedule'
+    # public のみ。TTL 超過の世界公開を防ぐのが日次掃除の目的で、private では便益が無いのに
+    # 枠だけ課金されるため（理由は上の schedule のコメント）。private では skip＝分数ゼロで、
+    # 掃除は次の取得時の publish-ephemeral（同じ失効ロジックを通る）に委ねる。
+    if: github.event_name == 'schedule' && github.event.repository.private == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
