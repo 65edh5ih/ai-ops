@@ -63,9 +63,13 @@ if (existsSync(inboxDir)) {
   // README.md は取り込まない: ディレクトリを常に git 追跡状態に保つプレースホルダ
   // （ops-sync が配布・維持）。これを消すと、全フラグメント統合後に inbox が空になり
   // fresh checkout で「書き込み先」ディレクトリごと消える。
+  // ファイル名は <YYYY-MM-DD>T<HHMMSS>Z-... なので、辞書順の降順＝新しい順。
+  // 下流の日付ソートは「日付だけ」を見る安定ソートなので、**同じ日付の中の順序はここで決まる**。
+  // 昇順で渡すと同日エントリが古い順に並び、「新しいエントリが上」（docs/task-history.md）に反する
+  // ——同日中に前のエントリを訂正した場合、古い方が上に来て先に読まれる。
   const files = readdirSync(inboxDir)
     .filter((f) => f.endsWith('.md') && f.toLowerCase() !== 'readme.md')
-    .sort();
+    .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
   for (const f of files) {
     const fp = path.join(inboxDir, f);
     const { blocks } = splitBlocks(readFileSync(fp, 'utf8'));

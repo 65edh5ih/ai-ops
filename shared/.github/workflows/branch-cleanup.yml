@@ -85,6 +85,38 @@ jobs:
           done < "$open_pr_heads"
           rm -f "$open_pr_heads"
 
+          # age_days は削除の唯一の時間ガード。空欄・負値・非数値のまま算術に入れると bash は空を 0 と
+          # みなし（または未来の cutoff を作り）、prefixes に一致する未保護ブランチが年齢に関係なく全件
+          # 削除対象になる。削除は不可逆なので、正の整数であることを確認できないときは実行しない（MUST）。
+          # 上限も要る: 桁数が大きいと AGE_DAYS * 86400 が bash の符号付き64bit演算を溢れて負に回り、
+          # cutoff が未来になって同じ「全件削除」に落ちる（例: 213503982334600）。
+          AGE_DAYS_MAX=36500      # 100年。ブランチ掃除の入力としてこれを超える値は誤入力とみなす
+          AGE_DAYS_MAX_DIGITS=5   # ${AGE_DAYS_MAX} の桁数
+          age_raw="$AGE_DAYS"
+          case "$age_raw" in
+            ''|*[!0-9]*)
+              echo "::error::age_days must be a positive integer (got '${age_raw}'); refusing to delete branches"
+              exit 1
+              ;;
+          esac
+          # 先頭ゼロを**文字列のまま**落とす（08 等を8進数と解釈させない）。
+          age_trimmed="$age_raw"
+          while [ "${#age_trimmed}" -gt 1 ] && [ "${age_trimmed#0}" != "$age_trimmed" ]; do
+            age_trimmed="${age_trimmed#0}"
+          done
+          # **桁数で先に弾く**（MUST）。算術展開は 64bit で回り込むため、上限判定を $(( )) の後に置くと
+          # 巨大な入力が小さな正の値に化けて検査を通り抜ける（例: 18446744073709551617 → 1）。
+          # 上限超えは算術に入れる前に文字列長で落とす。
+          if [ "${#age_trimmed}" -gt "$AGE_DAYS_MAX_DIGITS" ]; then
+            echo "::error::age_days must be between 1 and ${AGE_DAYS_MAX} (got '${age_raw}'); refusing to delete branches"
+            exit 1
+          fi
+          AGE_DAYS=$((10#$age_trimmed))
+          if [ "$AGE_DAYS" -lt 1 ] || [ "$AGE_DAYS" -gt "$AGE_DAYS_MAX" ]; then
+            echo "::error::age_days must be between 1 and ${AGE_DAYS_MAX} (got '${age_raw}'); refusing to delete branches"
+            exit 1
+          fi
+
           cutoff=$(( $(date -u +%s) - AGE_DAYS * 86400 ))
 
           candidates=0; deleted=0; skipped=0
