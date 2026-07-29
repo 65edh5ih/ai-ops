@@ -76,7 +76,9 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
   `shared/.github/net-allowlist.txt`**、**Actions 月枠の信号は ops-sync の `ci-logs`** で、これらは移っていない。
 - net-fetch の揮発結果は `publish-ephemeral` が既定3日で掃除する。`slice-root` 直下で `.published-at` が無い・
   読めないスライスも安全側に削除し、最後のスライスが失効した場合は空 tree を publish するため、marker の
-  欠落や空ブランチ化を理由に古い結果が残り続けることはない。
+  欠落や空ブランチ化を理由に古い結果が残り続けることはない。ただし**失効を走らせる日次 sweep は public
+  リポジトリのみ**（private では枠を使わないため skip）。private の休眠中は最後のスライスが次の取得まで
+  残るので、「3日で消える」を private で当てにしない（→ `shared/docs/net-fetch.md`）。
 
 ## セットアップ（1回だけ）
 

@@ -357,6 +357,16 @@ marker を読めて期限切れと判定できたスライスに加え、marker 
 証明できないため fail-closed で削除する。scheduled sweep は最後のスライスが消えた場合も
 空 tree の orphan commit を publish し、揮発ブランチ上に期限切れデータを残さない。
 
+**失効が走る契機は「次の書き込み」と「日次 sweep」の2つで、sweep は public リポジトリでだけ動く**
+（`net-fetch.yml` の `sweep` ジョブが private を skip する）。日次 sweep の目的は「TTL を超えて
+世界公開する時間を最小化する」ことで、結果が非公開な private consumer では便益が無いのに Actions
+分数だけがアカウント枠に課金されるため。したがって実際の最大保持はモードで違う:
+
+- **集約モード（public な ops-runner）**: TTL＋最大1日。上段の「期限切れデータを残さない」が成立する。
+- **分散モード（private consumer）**: 失効は次の取得時にしか走らないので、休眠中は最後のスライスが
+  **次に net-fetch を使うまで**残る（上限なし）。非公開なので世界公開にはならないが、
+  「3日で消える」保証は private には無い。
+
 分けた理由は、**git ブランチでは削除が削除にならない**こと。`ci-logs` からファイルを消しても内容は履歴に
 残り、ops-sync は public なので取得結果が世界公開の恒久記録として積み上がる。かといって `ci-logs` ごと
 orphan 再構築すると quota 信号や archive ログの経緯まで巻き込む。**性質で置き場を分けるのが唯一の解**で、
