@@ -35,6 +35,21 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
   「読んだら用済みの一次データ」なので、
   恒久ログの `ci-logs` には publish しない（public リポジトリでは削除しても git 履歴に永久に残るため）。
   よって **dispatch したら間を置かずに読むこと**（MUST）。古い取得を後から掘り返す用途には使えない。
+
+  **上の TTL が縛るのは結果ブランチだけ**（重要）。同じ本文は「Echo result to job log」ステップで
+  **ジョブログにも出る**（既定 256 KiB まで）ので、取得内容には寿命が2つある:
+  - **結果ブランチのスライス**: 上記の TTL（git ブランチなので、リポジトリ設定の
+    Artifact and log retention の対象**外**。書き換えられるまで残る）。
+  - **ジョブログの写し**: リポジトリ設定 **Artifact and log retention**（既定 90 日・public は最大 90 日、
+    private は最大 400 日）に従う。TTL では消えない。
+    設定: `https://github.com/<owner>/<repo>/settings/actions`（Settings → Actions → General →
+    Artifact and log retention）。
+
+  つまり **public な集約モードでは、取得内容が TTL の3日を過ぎてもジョブログとして最大 90 日
+  世界公開され続ける**（public リポジトリの run ログは誰でも読める）。日次 sweep で縛れるのは
+  ブランチ側だけなので、**機微を取得しうるものを public 経路に流さない**という原則
+  （→「モード」節）はログ側にも同じだけ効く。集約モードで公開時間を実際に縮めたいときは、
+  ブランチの TTL ではなくこのリポジトリ設定を下げる。
 - **エージェントに要る能力**（この仕組みはツール中立。以下の能力を*何で*満たすかはランタイム依存で、
   GitHub の MCP ツール・`gh` CLI・REST API のどれでもよい）:
   - **対象リポジトリの `net-fetch` workflow を `workflow_dispatch` で起動できる**こと（`actions:write` 相当）。
@@ -146,8 +161,13 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
   無効（非許可先への 302 迂回を防ぐ）。
 - **機微は public 経路を通れない**: 集約モードの判定は共通ベース allowlist のみ。機微ドメインはそこに無い
   ため、機微取得は private リポジトリの分散モードでしか成立しない（配置がルールを強制する）。
-- **取得結果が恒久記録にならない**: 結果ブランチは毎回 orphan 1コミットに書き換えられ、TTL を過ぎた
-  スライスは消える。削除がツリーにしか効かず履歴に残る恒久ログ（`ci-logs`）とは別扱いにしてある。
+- **取得結果が git 履歴に堆積しない**: 結果ブランチは毎回 orphan 1コミットに書き換えられる。削除が
+  ツリーにしか効かず履歴に残る恒久ログ（`ci-logs`）とは別扱いにしてある。
+  **ただし「一定期間で必ず消える」は保証ではない**（構造的に保証されるのは上の「履歴に堆積しない」まで）。
+  TTL 失効が走るのは「次の書き込み」と「日次 sweep」で、sweep は public のみ——**private の休眠中は
+  最後のスライスが次の取得まで残り、上限が無い**。ジョブログの写しはさらに別寿命
+  （Artifact and log retention・既定 90 日）で、TTL では消えない。確実に消すなら結果ブランチを手で削除する
+  （`git push origin --delete net-fetch-results`）。詳細は上の「結果ブランチ」節。
 
 ## よくある失敗
 
