@@ -88,11 +88,14 @@ slice 単位で publish する。このための composite action `.github/actio
    | `Invalid workflow file`・式や `uses:` の参照エラー | **ワークフロー側の不具合**（構文・式・reusable workflow の参照）。**直前の自分の変更が原因**でありうる | ワークフローを直す |
    | `Internal server error. Correlation ID: …` | GitHub 側の一過性障害 | 再実行してよい |
    | 支払い・枠に関する文言 | アカウント側の実行拒否（枠切れ・spending limit） | 復旧を待つ（→ `docs/actions-quota.md`） |
-   | conclusion が `cancelled` で、同じワークフローの後続 run がある | **後続 run に追い越された**（`concurrency` の `cancel-in-progress: true`）。runner 起動前に取り消されるとジョブ0件・課金0で終わる**正常な結果** | 障害として扱わない。後続 run の結果を見る |
+   | conclusion が `cancelled` で、**その run 自身に concurrency による置き換えを示す表示がある**（run ページの取り消し理由・`canceling since ... concurrency group` 等の annotation） | **後続 run に追い越された**（`concurrency` の `cancel-in-progress: true`）。runner 起動前に取り消されるとジョブ0件・課金0で終わる**正常な結果** | 障害として扱わない。置き換えた後続 run の結果を見る |
    | 上記にない文言、または原因を示す文言が無い | **未分類**。既知の原因のどれかと推測しない | 表示全文と run URL を記録してユーザーへ提示し、GitHub Status と再実行結果で追加調査する |
 
    **この表は網羅ではない**（MUST NOT: 一致する行が無いことを理由に、近い行へ寄せて分類する）。
    一致する行が無ければ最終行の「未分類」として扱い、conclusion と文言を**そのまま記録する**（MUST）。
+   分類の根拠は**その run 自身の表示**に限る（MUST NOT: 「後続 run がある」「よくある事象だ」のような
+   状況証拠から原因を推定する）。`cancelled` は手動・API 由来でも起こるため、置き換えを示す表示が
+   無ければ正常と決めつけず未分類として扱う。
 
    - 完了条件: 原因が run ページの文言に基づいて確定しているか、確定できなければ「未分類」として表示全文と
      run URL をユーザーへ引き継いでいる。表に無い conclusion や文言を既知の原因へ当てずっぽうで分類しては
