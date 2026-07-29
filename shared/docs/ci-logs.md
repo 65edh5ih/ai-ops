@@ -29,7 +29,24 @@ slice 単位で publish する。このための composite action `.github/actio
 ## 手順A: 新規ワークフローに CI ログ出力を組み込む
 
 1. ジョブに `permissions: contents: write` を付ける（MUST）。
-2. スクリプトログを `logs/ci/scripts/<name>.log` へ出す（`2>&1 | tee`）（MUST）。
+2. スクリプトログを `logs/ci/scripts/<name>.log` へ出す（MUST）。次の2点を**必ず同じステップに含める**:
+   - **出力先ディレクトリを先に作る**（MUST）。クリーンな runner に `logs/ci/scripts/` は存在せず、
+     無いまま `tee` に流すと `tee` 自身が失敗する。
+   - **`set -o pipefail` を効かせる**（MUST）。パイプの終了ステータスは既定で最後のコマンド（`tee`）の
+     ものになるため、`pipefail` が無いとビルド・テスト・デプロイが落ちてもジョブが成功のまま通る
+     （＝ログを足したことで結果が変わる）。`pipefail` を使わない場合は `PIPESTATUS` で同等の判定をする。
+
+   ```yaml
+   - name: Build
+     shell: bash
+     run: |
+       set -euo pipefail          # pipefail: 本体の失敗を tee が飲み込まない
+       mkdir -p logs/ci/scripts   # クリーン runner には無いので先に作る
+       ./scripts/build.sh 2>&1 | tee logs/ci/scripts/build.log
+   ```
+
+   - 完了条件: 本体コマンドをわざと失敗させた run でジョブが失敗し、かつ `logs/ci/scripts/<name>.log`
+     が作られている。
 3. ジョブ末尾に「Stage CI log snapshot」と「Publish logs to ci-logs branch」
    (`uses: ./.github/actions/publish-ci-logs`) の2ステップを `if: always()` で足す（＝この inline 公開は
    成功・失敗を問わず常時）。**手順3は例外なく全ワークフローで実施する（MUST）**。
@@ -55,9 +72,13 @@ slice 単位で publish する。このための composite action `.github/actio
 
 ## 手順B: CI 失敗の切り分け（ログを読み始める前に）
 
-1. **その run でジョブが1つでも起動したかをジョブ一覧で確認する**。
+1. **その run でジョブが1つでも起動したかをジョブ一覧で確認する**（MUST）。この分類を飛ばすと、
+   ジョブ0件の run をログ欠落と読み違えて調査が振り出しに戻る（手順3はこの分類に依存する）。
    - 完了条件: 「ジョブが走った」か「ジョブ0件」かが確定している。
-2. **ジョブが走っていれば**、通常どおりログを読む（inline slice → 失敗なら collector のフル生ログ）。
+2. **ジョブが走っていれば**、通常どおりログを読む（MUST）。inline slice を先に読み、失敗 run なら
+   collector のフル生ログへ進む。
+   - 完了条件: 当該 run の inline slice を読み、失敗の一次原因を示すログ行を引用できる
+     （slice が存在しない場合はその事実が確定している）。
 3. **ジョブ0件だった場合**は、**run のページ（または run/check の annotation）に出ている文言を
    必ず読む**（MUST）。ジョブが起動していない原因は少なくとも3種類あり、**ジョブ数だけでは区別
    できない**（MUST NOT: 件数だけで原因を断定する）:
@@ -67,7 +88,11 @@ slice 単位で publish する。このための composite action `.github/actio
    | `Invalid workflow file`・式や `uses:` の参照エラー | **ワークフロー側の不具合**（構文・式・reusable workflow の参照）。**直前の自分の変更が原因**でありうる | ワークフローを直す |
    | `Internal server error. Correlation ID: …` | GitHub 側の一過性障害 | 再実行してよい |
    | 支払い・枠に関する文言 | アカウント側の実行拒否（枠切れ・spending limit） | 復旧を待つ（→ `docs/actions-quota.md`） |
-   | 上記にない文言、または原因を示す文言が無い | **未分類**。既知3種類のどれかと推測しない | 表示全文と run URL を記録してユーザーへ提示し、GitHub Status と再実行結果で追加調査する |
+   | conclusion が `cancelled` で、同じワークフローの後続 run がある | **後続 run に追い越された**（`concurrency` の `cancel-in-progress: true`）。runner 起動前に取り消されるとジョブ0件・課金0で終わる**正常な結果** | 障害として扱わない。後続 run の結果を見る |
+   | 上記にない文言、または原因を示す文言が無い | **未分類**。既知の原因のどれかと推測しない | 表示全文と run URL を記録してユーザーへ提示し、GitHub Status と再実行結果で追加調査する |
+
+   **この表は網羅ではない**（MUST NOT: 一致する行が無いことを理由に、近い行へ寄せて分類する）。
+   一致する行が無ければ最終行の「未分類」として扱い、conclusion と文言を**そのまま記録する**（MUST）。
 
    - 完了条件: 原因が run ページの文言に基づいて確定しているか、確定できなければ「未分類」として表示全文と
      run URL をユーザーへ引き継いでいる。表に無い conclusion や文言を既知の原因へ当てずっぽうで分類しては

@@ -36,7 +36,7 @@
 | consumer の `.ops-sync/outbox/*.md` | その consumer のエージェント |
 | 各リポジトリの `docs/history-inbox/<...>.md`（履歴フラグメント） | 新規1ファイル＝そのリポジトリのエージェント（既存ファイルには触れない） |
 | 各リポジトリの `docs/AI_TASK_HISTORY.md` | inbox の統合・アーカイブ移動とも ops-sync の archive CI（下記・保守バッチ）。エージェントは直接編集しない |
-| 各リポジトリの `.ops-sync/codex-review-inbox.md`／private の `.ops-sync/codex-review-inbox-all.md` | ops-sync の codex-review-inbox CI（下記「Codex レビューの取りこぼし対策」）。人もエージェントも編集しない |
+| private consumer の `.ops-sync/codex-review-inbox.md`／private の `.ops-sync/codex-review-inbox-all.md` | ops-sync の codex-review-inbox CI（下記「Codex レビューの取りこぼし対策」）。人もエージェントも編集しない |
 
 ## 配布物の三層＋タスク
 
@@ -102,7 +102,7 @@ consumer へ伝播する（追加しかできない実装だと撤去がドリ�
 | `scripts/archive-task-history.mjs` | （保守）`docs/history-inbox/` のフラグメントを `docs/AI_TASK_HISTORY.md` へ統合し、保持量超過分を `docs/history-archive/` へ移す |
 | `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ops-sync＋全 consumer を巡回し、未統合フラグメントか超過エントリがあれば統合＋アーカイブ PR を生成・マージ |
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer から対象が消えた）を刈る |
-| `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から**未 resolve の Codex レビュースレッド**を集め、全体一覧＋リポジトリごとのスライスに落とす |
+| `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から**未 resolve の Codex レビュースレッド**を集め、全体一覧＋**private consumer 分だけ**のスライスに落とす |
 | `.github/workflows/codex-review-inbox.yml` | （信号）cron（毎時）＋手動で上記を実行し、全体一覧を private の `.ops-sync/codex-review-inbox-all.md`、private consumer の自分の分を `.ops-sync/codex-review-inbox.md` へ直接 push（内容に変化があるときだけ）。public repo は全体一覧だけ |
 | `shared/.github/actions/publish-ephemeral/` | （下り・ファイル）揮発ブランチへの publish。毎回 orphan 1コミットへ書き換え＋TTL 失効＋`--force-with-lease`。恒久ログ用の `publish-ci-logs` と対（下記「揮発する出力と恒久ログを分ける」） |
 
@@ -299,8 +299,7 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
   全リポジトリで同じパスなので、共通ブロックの発火トリガを「このリポジトリの `.ops-sync/codex-review-inbox.md`
   を読め」の1文に固定できる（private consumer のセッションでは自分の積み残しを自力で読める）。public の
   `ops-sync` / `ops-runner` は走査対象には残すが、スライスを書かず private の全体一覧だけに載せる。
-  切り替え前に public repo へ publish 済みだったスライスは、main 保護を迂回する workflow の直接 push ではなく、
-  各 public repo の通常の削除 PR で撤去した。以後 workflow は public repo を書き込み先に含めないため再生成しない。
+  workflow は public repo を書き込み先に含めないので、public repo にスライスは存在しない。
 
 置き場をこう分ける理由は2つ:
 

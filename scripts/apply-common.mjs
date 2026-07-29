@@ -39,6 +39,23 @@ function findRegion(text) {
 
 const region = findRegion(target);
 
+// 開始・終了マーカーが揃わない状態（片方だけ・順序逆）は、手編集や切り詰めで区間が壊れた印。
+// ここで追記フォールバックに落ちると、壊れたマーカーを残したまま共通ブロックがもう1つ増え、
+// 全エージェントが読む AGENTS.md に同じ規約が二重に載る。黙って直せないので失敗させる。
+if (!region) {
+  const strays = [
+    [START, END],
+    [LEGACY_START, LEGACY_END],
+  ].flat().filter((m) => target.includes(m));
+  if (strays.length > 0) {
+    console.error(
+      `error: ${targetPath} has an unpaired OPS-SYNC:COMMON marker. ` +
+        'Restore both markers (in start→end order) or remove them all, then re-run.',
+    );
+    process.exit(1);
+  }
+}
+
 let out;
 if (region) {
   out = target.slice(0, region.from) + block + target.slice(region.to);

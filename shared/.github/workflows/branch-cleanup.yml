@@ -85,6 +85,20 @@ jobs:
           done < "$open_pr_heads"
           rm -f "$open_pr_heads"
 
+          # age_days は削除の唯一の時間ガード。空欄・負値・非数値のまま算術に入れると bash は空を 0 と
+          # みなし（または未来の cutoff を作り）、prefixes に一致する未保護ブランチが年齢に関係なく全件
+          # 削除対象になる。削除は不可逆なので、正の整数であることを確認できないときは実行しない（MUST）。
+          case "$AGE_DAYS" in
+            ''|*[!0-9]*)
+              echo "::error::age_days must be a positive integer (got '${AGE_DAYS}'); refusing to delete branches"
+              exit 1
+              ;;
+          esac
+          if [ "$AGE_DAYS" -lt 1 ]; then
+            echo "::error::age_days must be >= 1 (got '${AGE_DAYS}'); refusing to delete branches"
+            exit 1
+          fi
+
           cutoff=$(( $(date -u +%s) - AGE_DAYS * 86400 ))
 
           candidates=0; deleted=0; skipped=0
