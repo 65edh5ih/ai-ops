@@ -37,24 +37,50 @@ function findRegion(text) {
   return null;
 }
 
-const region = findRegion(target);
-
-// 開始・終了マーカーが揃わない状態（片方だけ・順序逆）は、手編集や切り詰めで区間が壊れた印。
-// ここで追記フォールバックに落ちると、壊れたマーカーを残したまま共通ブロックがもう1つ増え、
+// マーカーの状態を**区間を選ぶ前に**全数検査する。壊れた状態のまま追記フォールバックに落ちる／
+// 健全な側の区間だけ差し替えると、壊れたマーカーと古い本文が残ったまま共通ブロックがもう1つ増え、
 // 全エージェントが読む AGENTS.md に同じ規約が二重に載る。黙って直せないので失敗させる。
-if (!region) {
-  const strays = [
-    [START, END],
-    [LEGACY_START, LEGACY_END],
-  ].flat().filter((m) => target.includes(m));
-  if (strays.length > 0) {
-    console.error(
-      `error: ${targetPath} has an unpaired OPS-SYNC:COMMON marker. ` +
-        'Restore both markers (in start→end order) or remove them all, then re-run.',
-    );
-    process.exit(1);
+// 健全と認めるのは「新旧どちらか一方の組が start→end の順にちょうど1組」か「どちらも皆無」だけ。
+// （移行中は旧の組だけ、移行後は新の組だけ。新旧が同時に揃っている状態も規約の二重掲載なので弾く。）
+function markerProblems(text) {
+  const count = (needle) => text.split(needle).length - 1;
+  const problems = [];
+  const sets = [
+    ['OPS-SYNC:COMMON', START, END],
+    ['AI-OPS:COMMON (legacy)', LEGACY_START, LEGACY_END],
+  ];
+  let complete = 0;
+  for (const [label, s, e] of sets) {
+    const ns = count(s);
+    const ne = count(e);
+    if (ns === 0 && ne === 0) continue;
+    if (ns > 1 || ne > 1) {
+      problems.push(`${label}: duplicated markers (start x${ns}, end x${ne})`);
+    } else if (ns !== 1 || ne !== 1) {
+      problems.push(`${label}: unpaired marker (start x${ns}, end x${ne})`);
+    } else if (text.indexOf(e) < text.indexOf(s)) {
+      problems.push(`${label}: end marker appears before start marker`);
+    } else {
+      complete += 1;
+    }
   }
+  if (complete > 1) {
+    problems.push('both the current and legacy marker blocks are present (rules would be duplicated)');
+  }
+  return problems;
 }
+
+const problems = markerProblems(target);
+if (problems.length > 0) {
+  console.error(
+    `error: ${targetPath} has a malformed OPS-SYNC:COMMON marker state:\n` +
+      problems.map((p) => `  - ${p}`).join('\n') +
+      '\nLeave exactly one start/end pair (or remove them all for initial wiring), then re-run.',
+  );
+  process.exit(1);
+}
+
+const region = findRegion(target);
 
 let out;
 if (region) {
