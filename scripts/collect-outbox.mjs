@@ -62,6 +62,12 @@ function branchSlug(name) {
 
 // 削除率チェック: 既存行数に対して削除が DELETE_RATIO_LIMIT を超える提案は差し戻す
 const DELETE_RATIO_LIMIT = 0.5;
+
+// 常時層（AGENTS_COMMON.md）の 1 提案あたりの純増がこれを超えたら自動マージせず人間に回す。
+// この区間は全 consumer・全エージェントの全タスクのコンテキストに常時乗るので、増やす判断は
+// 「その内容が正しいか」とは別に「常時払うコストに見合うか」の判断で、機械には決められない。
+// 現状 1 万文字弱の区間に対する目安として、節が 1 つ増える規模＝要レビューに置いている。
+const COMMON_GROWTH_LIMIT = 800;
 function deletionRatioBreach(oldText, newText) {
   const oldLines = oldText.split('\n').length;
   const newLines = newText.split('\n').length;
@@ -143,6 +149,14 @@ let commonEditDone = false;
 let staleMismatch = false;
 const sharedPathsDone = new Set();
 
+// 自動マージを保留する理由（1件でもあれば取り込み PR は人間のレビュー待ちにする）。
+// 「機械が安全と確認できたものだけ自動で入れる」であって「危なそうなものを弾く」ではないので、
+// 判定不能（ベース欄が無い等）は保留側に倒す——判定不能を「問題なし」と読み替えない。
+const holds = [];
+function hold(p, reason) {
+  holds.push(`${p.name}: ${reason}`);
+}
+
 // 不正な提案を outbox/rejected/ へ移し、先頭にエラーノートを付ける
 function reject(p, reason, extra) {
   const original = readFileSync(p.file, 'utf8');
@@ -218,11 +232,13 @@ for (const p of batch) {
     let staleNote = null;
     if (!baseHash) {
       staleNote = '- ⚠ 提案に `ベース:`（編集元ブロックのハッシュ）がありません。鮮度を機械判定できないため、差分をよく確認してください。';
+      hold(p, 'ベース欄が無く鮮度を機械判定できない');
     } else if (baseHash !== currentHash) {
       staleMismatch = true;
       staleNote =
         `- ⚠ **ベース不一致**: 提案のベース \`${baseHash}\` が現在の正本 \`${currentHash}\` と一致しません。` +
         '提案が書かれた後に正本が変わっています。**このままマージするとその間の変更が巻き戻る**ため、差分を必ず確認してください。';
+      hold(p, `ベース不一致（提案 ${baseHash} / 現在 ${currentHash}）`);
     }
 
     // 常時層サイズの計測: この区間は全 consumer・全エージェントの全タスクのコンテキストに常時乗る。
@@ -232,6 +248,9 @@ for (const p of batch) {
       `- 常時層サイズ: ${fmtNum(existing.trim().length)} → ${fmtNum(newText.length)} 文字` +
       `（${fmtDelta(delta)} 文字・概算 ${fmtDelta(Math.round(delta / 2))} トークン）。` +
       'この区間は全 consumer・全エージェントの全タスクに常時ロードされます。';
+    if (delta > COMMON_GROWTH_LIMIT) {
+      hold(p, `常時層が ${fmtDelta(delta)} 文字（上限 ${fmtNum(COMMON_GROWTH_LIMIT)}）`);
+    }
 
     writeFileSync(commonPath, newText + '\n');
     rmSync(p.file);
@@ -289,16 +308,19 @@ for (const p of batch) {
         staleNote =
           `- ⚠ **ベース不一致**: 提案は \`${baseHash}\` をベースとしていますが、\`shared/${targetRel}\` は現在存在しません。` +
           '新規追加として扱いますが、対象パスの誤りか、提案後にファイルが削除された可能性があるため確認してください。';
+        hold(p, `ベース付きだが shared/${targetRel} が存在しない`);
       }
     } else {
       const currentHash = hash12(existingFile);
       if (!baseHash) {
         staleNote = '- ⚠ 提案に `ベース:`（編集元ファイルのハッシュ）がありません。鮮度を機械判定できないため、差分をよく確認してください。';
+        hold(p, 'ベース欄が無く鮮度を機械判定できない');
       } else if (baseHash !== currentHash) {
         staleMismatch = true;
         staleNote =
           `- ⚠ **ベース不一致**: 提案のベース \`${baseHash}\` が現在の \`shared/${targetRel}\` \`${currentHash}\` と一致しません。` +
           '提案が書かれた後に正本が変わっています。**このままマージするとその間の変更が巻き戻る**ため、差分を必ず確認してください。';
+        hold(p, `ベース不一致（提案 ${baseHash} / 現在 ${currentHash}）`);
       }
     }
 
@@ -397,8 +419,21 @@ const prTitle = applied.length === 1
   ? `${titlePrefix}${applied[0].title}`
   : `${titlePrefix}chore: outbox 提案を取り込み (${consumerRepo}・${applied.length}件)`;
 
+// 自動マージの可否。「保留理由が1つも無い」ときだけ自動で入れる（保留側に倒す既定）
+const autoMerge = applied.length > 0 && holds.length === 0;
+
 const intakeBody = [
   `\`${consumerRepo}\` の outbox 提案 ${applied.length} 件を取り込みます。`,
+  '',
+  autoMerge
+    ? '**この PR は自動マージされます**（全提案について、ベースハッシュが現在の正本と一致し、' +
+      '常時層の増加も上限内であることを機械的に確認済み。提案内容そのものの妥当性は提案元の' +
+      'セッションでユーザーが確認しています）。'
+    : ['> [!IMPORTANT]',
+       '> **自動マージしません。オーナーのレビューが要ります。** 保留理由:',
+       '>',
+       ...holds.map((h) => `> - ${h}`),
+      ].join('\n'),
   '',
   ...applied.map((a) => `### \`${a.name}\`（${a.type}）\n\n${a.section}`),
   '',
@@ -442,11 +477,21 @@ emitOutputs({
   cleanup_branch: `ops-sync/cleanup-${slug}`,
   pr_title: prTitle,
   cleanup_title: cleanupTitle,
+  auto_merge: autoMerge ? 'true' : 'false',
+  // 保留理由は提案名を含む＝提案元 consumer の中身なので、public な ops-sync のジョブログ・
+  // ロールアップには出さない（→ docs/ci-logs.md「ログの公開先」）。件数だけ output に出し、
+  // 理由の全文は取り込み PR 本文と、提案元 consumer の ci-logs に出る処理ログで読む。
+  hold_count: String(holds.length),
 });
 if (applied.length) writeBody('PR_BODY_PATH', intakeBody);
 writeBody('CLEANUP_BODY_PATH', cleanupBody);
 
+// 保留理由は提案名を含むので、この詳細ログは提案元 consumer の ci-logs にだけ出る（workflow 側で
+// ジョブログへは出さない）。ここに出しておかないと「なぜ自動マージされなかったか」がどこにも残らない
+for (const h of holds) console.log(`[hold] ${consumerRepo}/${h}`);
+
 console.log(
-  `processed ${consumerRepo}: applied=${applied.length} rejected=${rejected.length} deferred=${deferred.length}` +
+  `processed ${consumerRepo}: applied=${applied.length} rejected=${rejected.length} deferred=${deferred.length} ` +
+  `auto_merge=${autoMerge}${holds.length ? ` (holds=${holds.length})` : ''}` +
   (proposals.length > batch.length ? ` (other consumers pending: ${proposals.length - batch.length})` : ''),
 );

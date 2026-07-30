@@ -131,7 +131,7 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
      ops-runner や consumer に届く同名ファイルは sync が配る複製なので、直しても効かない（触らない。MUST NOT）。
      **正本を直す経路（ops-sync へ直接 PR / `種別: shared-file` の outbox 提案）と、その選び方は
      [`docs/outbox-proposal.md`](outbox-proposal.md) に従う**（MUST）——どちらの経路でも**追加を決めるのは
-     ユーザーで、入るのは ops-sync 側の人間のマージ**という上の要求は変わらない。ここで足りないのは
+     ユーザーで、マージするのは ops-sync 側（自分でマージしない）**という上の要求は変わらない。ここで足りないのは
      **正本のある ops-sync** への手で、step 2 でセッションに足した実行先の ops-runner とは別物
      （ops-runner の承諾はここには使えない。allowlist の正本を直せるのは ops-sync だけ）。
      **機微を取得しうるドメインは共通ベースに入れない**（world-public な集約経路を通ってしまう。ただし

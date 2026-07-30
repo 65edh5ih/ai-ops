@@ -119,6 +119,7 @@ jobs:
         run: cp /tmp/ci-logs/collect-outbox.log /tmp/ci-logs-public/collect-failure.log || true
 
       - name: Open intake PR to ops-sync
+        id: intake-pr
         if: steps.collect.outputs.found == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
@@ -131,7 +132,26 @@ jobs:
           title: ${{ steps.collect.outputs.pr_title }}
           body-path: ${{ runner.temp }}/pr-body.md
 
+      # 提案内容そのものの妥当性は提案元セッションでユーザーが見ている。ここで人間に見せる価値が
+      # あるのは、**提案が書かれた後に前提が変わった**（ベース不一致・判定不能）ことと、常時層の
+      # 肥大化——どちらも提案時点では存在しない情報で、スレッドでの承認では代替できない。
+      # その2つが無いと機械的に確認できたときだけ自動で入れる（判定は collect が行う）。
+      - name: Merge intake PR
+        id: merge-intake
+        if: steps.collect.outputs.auto_merge == 'true' && steps.intake-pr.outputs.pull-request-url != ''
+        env:
+          GH_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
+          PR_URL: ${{ steps.intake-pr.outputs.pull-request-url }}
+        run: |
+          if gh pr merge --squash "$PR_URL"; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::intake PR の自動マージに失敗しました（PR は open のまま残します）: $PR_URL"
+          fi
+
       - name: Open cleanup PR to consumer (remove/reject processed proposals)
+        id: cleanup-pr
         if: steps.collect.outputs.consumer_changed == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
@@ -143,6 +163,21 @@ jobs:
           commit-message: 'chore: ops-sync が処理した提案を outbox から整理'
           title: ${{ steps.collect.outputs.cleanup_title }}
           body-path: ${{ runner.temp }}/cleanup-body.md
+
+      # cleanup をマージすると提案が outbox から消える＝オーナーが取り込み PR を close して却下する
+      # 逃げ道が無くなる。なので**取り込みが実際に入った後**にだけ掃除する。
+      # 却下だけの run（applied=0）は取り込み PR 自体が無く、オーナーの判断待ちも無いので掃除してよい
+      # ——ここを人間待ちにすると、壊れた提案1件が最古に居座って全 consumer の提案を止める。
+      - name: Merge consumer cleanup PR
+        if: >-
+          steps.cleanup-pr.outputs.pull-request-url != ''
+          && (steps.collect.outputs.applied == '0' || steps.merge-intake.outputs.merged == 'true')
+        env:
+          GH_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
+          PR_URL: ${{ steps.cleanup-pr.outputs.pull-request-url }}
+        run: |
+          gh pr merge --squash "$PR_URL" \
+            || echo "::warning::cleanup PR の自動マージに失敗しました（PR は open のまま残します）: $PR_URL"
 
       # ── 保守バッチ: 役目を終えたトゥームストーンの掃除 ─────────────────────────
       # 上の collect が ops-sync チェックアウトを取り込み PR 用に書き換えるため、
@@ -208,3 +243,32 @@ jobs:
           run-id: ${{ github.run_id }}
           commit-message: "ci-logs: collect-outbox (run ${{ github.run_id }})"
           token: ${{ secrets.OPS_SYNC_TOKEN }}
+
+      # ── 人間を待っているものを run の失敗として立てる ────────────────────────
+      # 自動マージが通る run は緑で終わる＝**赤は「人間が見るまで進まないものがある」の意味**になる。
+      # 自動マージを入れる前は、レビュー待ちの提案は open PR として残るのが唯一の信号だったが、
+      # 通常経路が自動で片付くようになると、残るものだけが見えていないと気づけない。
+      # 却下も同じ: cleanup を自動マージすると差し戻しが静かに完了してしまうので、ここで立てる。
+      # 最後に置くのは、この失敗で ci-logs の publish や掃除を巻き添えにしないため。
+      - name: Flag anything waiting on a human
+        if: always()
+        env:
+          APPLIED: ${{ steps.collect.outputs.applied }}
+          REJECTED: ${{ steps.collect.outputs.rejected }}
+          HOLDS: ${{ steps.collect.outputs.hold_count }}
+          MERGED: ${{ steps.merge-intake.outputs.merged }}
+          CONSUMER: ${{ steps.collect.outputs.consumer }}
+        run: |
+          set -u
+          waiting=0
+          # 提案は取り込んだが自動マージしなかった（＝ベース不一致・判定不能・常時層の肥大化）
+          if [ -n "${APPLIED}" ] && [ "${APPLIED}" != "0" ] && [ "${MERGED}" != "true" ]; then
+            echo "::error::取り込み PR がレビュー待ちです（保留 ${HOLDS:-?} 件・提案元 ${CONSUMER}）。理由は PR 本文と提案元の ci-logs を参照。"
+            waiting=1
+          fi
+          # 不正な提案を差し戻した（提案元のエージェントが書き直す必要がある）
+          if [ -n "${REJECTED}" ] && [ "${REJECTED}" != "0" ]; then
+            echo "::error::不正な提案 ${REJECTED} 件を ${CONSUMER} の outbox/rejected/ へ差し戻しました。理由は提案元の ci-logs を参照。"
+            waiting=1
+          fi
+          exit "$waiting"
