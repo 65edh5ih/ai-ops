@@ -74,12 +74,14 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 - **ops-runner に secret を置かない**（`github.token` のみ）。これが分離の目的そのもの。
 - 集約モードの dispatch 先・結果の読み戻し先はどちらも ops-runner。ただし **allowlist の正本は ops-sync の
   `shared/.github/net-allowlist.txt`**、**Actions 月枠の信号は ops-sync の `ci-logs`** で、これらは移っていない。
-- net-fetch の揮発結果は `publish-ephemeral` が既定3日で掃除する。`slice-root` 直下で `.published-at` が無い・
+- net-fetch の揮発結果は `publish-ephemeral` が TTL（public 60分・private 3日）で掃除する。`slice-root` 直下で `.published-at` が無い・
   読めないスライスも安全側に削除し、最後のスライスが失効した場合は空 tree を publish するため、marker の
   欠落や空ブランチ化を理由に古い結果が残り続けることはない。ただし公開時間を縮める主経路は TTL ではなく
   **エージェントが読了後に投げる cleanup dispatch**（`cleanup: 'true'`）で、これを省くと TTL いっぱい残る。
-  **日次 sweep は取りこぼし用のバックストップで public リポジトリのみ**（private では枠を使わないため skip。
-  private の休眠中は次の取得まで残るので「3日で消える」を当てにしない）。応答本文はジョブログには出さない
+  **毎時 sweep は取りこぼし用のバックストップで public リポジトリのみ**（private では枠を使わないため skip。
+  private の休眠中は次の取得まで残るので「3日で消える」を当てにしない）。public ではこの sweep が
+  **1日より古い成功 run を run ごと削除**もする（ログと dispatch 入力に残る取得 URL を消すため。
+  失敗 run は障害調査用に残す）。応答本文はジョブログには出さない
   （ログは TTL が効かず retention 設定に従うため。ログには meta と `bytes`/`sha256` だけ）。
   → `shared/docs/net-fetch.md`
 
