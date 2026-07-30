@@ -36,8 +36,11 @@
 //     PR 必須の main へ直接 push せず、private の全体一覧だけに載せる。
 //   - stdout のサマリ。**ops-sync の ci-logs（世界公開）に載るので、件数と repo 名しか出さない**
 //     （MUST NOT: 指摘本文・パスをログに出す。private リポジトリの内容が公開に落ちる）。
+//   - outputs。`merged_unresolved`（マージ済み PR に残っている件数）と `merged_unresolved_repos`
+//     （その repo 名）は、workflow が run を失敗させる判定に使う。一覧に積むだけでは
+//     **誰も見に行かない限り気づけない**ため（→ workflow の「Flag …」ステップ）。
 //
-// 終了コード: 常に 0。
+// 終了コード: 常に 0（失敗判定は workflow 側で行う。ここで落とすと一覧の書き出しが飛ぶ）。
 //
 // 内容が実質変わらないファイルは書き換えない（生成時刻だけの差分でコミットが立たないように）。
 
@@ -440,3 +443,10 @@ setOutput('open_findings', String(findings.length));
 setOutput('merged_unresolved', String(mergedCount));
 setOutput('failures', String(failures.length));
 setOutput('files_changed', String(filesChanged));
+// マージ済み PR に残っている指摘を抱えた repo 名。workflow がこれを使って run を失敗させ、
+// 「一覧に積まれたが誰も拾っていない」状態を可視化する（→ 下記 setOutput の直前のコメント）。
+// repo 名は件数と同じく公開してよい情報（指摘本文・パスは出さない）。
+setOutput(
+  'merged_unresolved_repos',
+  [...new Set(findings.filter((f) => f.prMerged).map((f) => f.repo))].sort().join(' '),
+);

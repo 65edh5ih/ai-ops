@@ -192,3 +192,33 @@ jobs:
           dest: codex-review-inbox
           commit-message: "ci(codex-review-inbox): open=${{ steps.collect.outputs.open_findings || '?' }}"
           token: ${{ github.token }}
+
+      # ── 一覧に積んだだけで終わらせない ──────────────────────────────────────
+      # ここまでで指摘は集まるが、**一覧はファイルなので誰かが見に行かないと気づけない**。
+      # 上り提案が自動マージされる経路（→ docs/outbox-proposal.md）では取り込み PR を扱うセッションが
+      # 居ないため、配布物の欠陥が consumer 同期 PR にだけ出た場合、拾う人が居ないまま残る。
+      # マージ済み PR の未 resolve（🔴）は「欠陥が既に配布済みで、誰も対応していない」状態なので、
+      # run を失敗させて badge に出す。open PR の指摘（🟡）はその PR を見ている者が居るので対象外。
+      #
+      # 取得失敗（読めなかった repo）も失敗にする——短い一覧を黙って出すと「指摘ゼロ」と区別できない。
+      #
+      # このログは ops-sync の ci-logs＝世界公開に載るので、**件数と repo 名までしか出さない**
+      # （指摘本文・パスは MUST NOT。中身は private の全体一覧と各 repo のスライスで読む）。
+      - name: Flag findings nobody is on
+        if: always()
+        env:
+          MERGED: ${{ steps.collect.outputs.merged_unresolved }}
+          MERGED_REPOS: ${{ steps.collect.outputs.merged_unresolved_repos }}
+          FAILURES: ${{ steps.collect.outputs.failures }}
+        run: |
+          set -u
+          waiting=0
+          if [ -n "${MERGED:-}" ] && [ "${MERGED}" != "0" ]; then
+            echo "::error::マージ済み PR に未 resolve の Codex 指摘が ${MERGED} 件あります（${MERGED_REPOS:-?}）。配布物への指摘なら全 consumer に欠陥が残っています。一覧: ${INBOX_ALL_PATH} in ${INBOX_ALL_REPO}（private repo は ${SLICE_PATH} にも自分の分がある）"
+            waiting=1
+          fi
+          if [ -n "${FAILURES:-}" ] && [ "${FAILURES}" != "0" ]; then
+            echo "::error::${FAILURES} 件の対象を読み取れませんでした。その分は未確認です（指摘が無いという意味ではない）。一覧の「取得できなかったもの」を参照。"
+            waiting=1
+          fi
+          exit "$waiting"
