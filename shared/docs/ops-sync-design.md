@@ -439,6 +439,16 @@ secret 判定に引っかかった取得は、結果が `net-fetch/<request_id>/
 不正な ID（`/`・改行を含む等）は digest 側だけを渡す——複数行の ID を素通しすると「複数のスライス名」に
 化けて無関係なスライスを消せてしまうため。
 
+この設計は**2つの名前空間を分離して初めて成立する**ので、`request_id` の検証で **`_invalid-` 始まりを
+予約**している。予約しないと、ある ID の退避先（例 `foo` → `_invalid-2c26b46b68ff`）を別のリクエストが
+そのまま `request_id` に選べてしまい、`foo` の cleanup が**無関係な取得結果を消す**。予約により
+`_invalid-*` スライスは退避経路でしか生まれず、到達経路も「元の ID を渡して digest を再計算させる」1本になる。
+
+cleanup ジョブが `GITHUB_OUTPUT` へスライス名を渡すときの**デリミタは固定にしない**。
+`__NET_FETCH_SLICES__` のような文字列自体が妥当な `request_id` なので、固定デリミタだと入力がその場で
+multiline output を閉じ、ステップが落ちて cleanup が何も消さなくなる（`net-fetch.sh` の出力と同じ理由・
+同じ対処＝乱数デリミタ＋実出力行との衝突チェック）。
+
 `publish-ephemeral` は `publish-ci-logs` を拡張せず別 action にしてある。挙動が大きく違ううえ
 （追記型 vs 毎回書き換え）、`publish-ci-logs` は consumer の deploy 系が依存する敏感な経路だから
 （AGENTS_COMMON「敏感なコードの共通化は挙動を変えない形に留める」）。

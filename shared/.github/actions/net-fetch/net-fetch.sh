@@ -103,8 +103,14 @@ structurally_valid_request_id() {
   # しかし dest が `net-fetch/.` になると publish 側の `cp -a src/. <root>/./` で結果ファイルが
   # スライスではなく SLICE_ROOT 直下に散る。失効ループは `-type d` の直下ディレクトリだけを走査する
   # ため、散ったファイルは**どの TTL でも消えない**（public なら恒久的に世界公開のまま残る）。
+  #
+  # `_invalid-*` は**退避用に予約**する。下の退避先が `_invalid-<生 ID の digest>` なので、これを
+  # ユーザーが選べると2つの名前空間が衝突する: 例えば `foo` の退避先は `_invalid-2c26b46b68ff` だが、
+  # 別のリクエストがその文字列をそのまま request_id に使えてしまい、`foo` の cleanup が**無関係な
+  # 取得結果を消す**。予約すれば `_invalid-*` スライスは退避経路でしか生まれず、到達経路も
+  # 「元の ID を渡して digest を再計算させる」1本に定まる。
   case "$1" in
-    ''|*[!A-Za-z0-9._-]*|*..*|.) return 1 ;;
+    ''|*[!A-Za-z0-9._-]*|*..*|.|_invalid-*) return 1 ;;
   esac
 }
 
@@ -174,7 +180,7 @@ fail()   { status="error";    reason="$1"; emit; }
 # ── 入力検証 ───────────────────────────────────────────────
 [ -n "$URL" ] || fail "empty url"
 structurally_valid_request_id "$REQUEST_ID" \
-  || fail "invalid request_id (allowed: A-Za-z0-9._- and must not contain '..')"
+  || fail "invalid request_id (allowed: A-Za-z0-9._-, must not contain '..', must not start with '_invalid-' (reserved))"
 matches_secret "$REQUEST_ID" \
   && reject "request_id appears to contain a secret; refusing to publish it"
 case "$METHOD" in GET|HEAD) : ;; *) reject "method not allowed (GET/HEAD only): $METHOD" ;; esac

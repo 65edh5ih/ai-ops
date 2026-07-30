@@ -30,7 +30,7 @@ on:
         type: string
         required: false
       request_id:
-        description: '相関 ID（[A-Za-z0-9._-]+）。結果は net-fetch-results の net-fetch/<request_id>/ に出る'
+        description: '相関 ID（[A-Za-z0-9._-]+。`_invalid-` 始まりは退避用に予約）。結果は net-fetch-results の net-fetch/<request_id>/ に出る'
         type: string
         required: true
       cleanup:
@@ -211,21 +211,32 @@ jobs:
           # 渡すと publish-ephemeral の検証で run 全体が落ち、退避スライスを消せなくなる。
           # 改行入りの ID をそのまま渡さないことは安全上も要る——drop-slice は1行1名なので、
           # 複数行の ID は「複数のスライス名」に化けて無関係なスライスを消しうる。
+          # 判定は net-fetch.sh の structurally_valid_request_id と同一（`_invalid-*` の予約を含む）。
+          # 予約があるので、退避先 `_invalid-<digest>` がユーザーの選んだ request_id と衝突しない
+          # ——衝突を許すと、ある ID の cleanup が同名を使った**無関係な取得結果**を消してしまう。
           names=""
           case "$REQUEST_ID" in
-            ''|*[!A-Za-z0-9._-]*|*..*|.)
+            ''|*[!A-Za-z0-9._-]*|*..*|.|_invalid-*)
               echo "request_id is not a bare slice name; dropping only the _invalid-<digest> fallback."
               ;;
             *) names="$REQUEST_ID" ;;
           esac
 
-          # 以下に流す2行はどちらもサニタイズ済み（検証を通った素の名前／16進 digest）なので、
-          # 固定デリミタで multiline output に載せても入力側から区切りを偽装できない。
+          # デリミタは固定にしない。`__NET_FETCH_SLICES__` のような文字列自体が妥当な request_id
+          # （`[A-Za-z0-9._-]+`）なので、固定だと入力がその場で multiline output を閉じ、続く
+          # `_invalid-...` 行が壊れた単独 output として解釈されてこのステップが落ちる
+          # ——結果として cleanup が何も消さない。net-fetch.sh と同じく、実際に出力する全行に
+          # 一致しないことを確かめてから使う。
+          delim="__NET_FETCH_SLICES_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')__"
+          while printf '%s\n%s\n' "$names" "_invalid-${digest}" | grep -Fqx "$delim"; do
+            delim="${delim}_$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          done
+
           {
-            echo 'names<<__NET_FETCH_SLICES__'
+            echo "names<<${delim}"
             [ -n "$names" ] && printf '%s\n' "$names"
             printf '_invalid-%s\n' "$digest"
-            echo '__NET_FETCH_SLICES__'
+            echo "$delim"
           } >> "$GITHUB_OUTPUT"
 
       - name: Drop the consumed result slice
