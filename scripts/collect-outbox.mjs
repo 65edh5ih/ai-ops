@@ -274,6 +274,34 @@ for (const p of batch) {
       continue;
     }
 
+    // 鮮度検査: common-block-edit と同じ理由（全文置換なので、古い版ベースの提案を取り込むと
+    // その間の変更が黙って巻き戻る）。提案側は**配布された自分のコピー**（consumer の `<対象パス>`）を
+    // ハッシュするが、apply-shared.mjs がバイト一致でコピーするので shared/<対象パス> と同値になる。
+    // 提案元に最新の配布が届いていない状態で書かれた提案も不一致になるが、巻き戻る危険は同じなので
+    // 区別せず要確認にする。
+    const existingFile = existsSync(targetAbs) ? readFileSync(targetAbs, 'utf8') : null;
+    const baseHash = meta['ベース'] || '';
+    let staleNote = null;
+    if (existingFile === null) {
+      // 新規追加。差し替える既存内容が無く鮮度の概念が無いので、ベース無しが正常
+      if (baseHash) {
+        staleMismatch = true;
+        staleNote =
+          `- ⚠ **ベース不一致**: 提案は \`${baseHash}\` をベースとしていますが、\`shared/${targetRel}\` は現在存在しません。` +
+          '新規追加として扱いますが、対象パスの誤りか、提案後にファイルが削除された可能性があるため確認してください。';
+      }
+    } else {
+      const currentHash = hash12(existingFile);
+      if (!baseHash) {
+        staleNote = '- ⚠ 提案に `ベース:`（編集元ファイルのハッシュ）がありません。鮮度を機械判定できないため、差分をよく確認してください。';
+      } else if (baseHash !== currentHash) {
+        staleMismatch = true;
+        staleNote =
+          `- ⚠ **ベース不一致**: 提案のベース \`${baseHash}\` が現在の \`shared/${targetRel}\` \`${currentHash}\` と一致しません。` +
+          '提案が書かれた後に正本が変わっています。**このままマージするとその間の変更が巻き戻る**ため、差分を必ず確認してください。';
+      }
+    }
+
     mkdirSync(path.dirname(targetAbs), { recursive: true });
     writeFileSync(targetAbs, fileBody + '\n');
     rmSync(p.file);
@@ -284,6 +312,7 @@ for (const p of batch) {
       title: `chore: shared/${targetRel} を更新 (${consumerRepo})`,
       section: [
         `\`shared/${targetRel}\` を提案内容で置き換えます（全文置換）。`,
+        staleNote,
         reasonLine,
       ].filter(Boolean).join('\n'),
     });
