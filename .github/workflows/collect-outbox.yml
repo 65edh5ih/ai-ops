@@ -72,11 +72,38 @@ jobs:
             git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${repo}.git" "consumers/${repo}"
           done < <(grep -vE '^[[:space:]]*(#|$)' ops-sync/consumers.txt)
 
+      # 自動マージの前提は「提案は提案元セッションでユーザーが見ている」だが、ops-sync 側から
+      # それは検証できない。代わりに提案元 main への書き込み権を使う——private なら main に載った
+      # 時点でオーナーのアクセス下にある。public にはその前提が無いので人間のレビューに回す。
+      # **判定できなかった repo は public 側に入れる**（引けなかった run で関門が黙って消えないように）。
+      - name: Determine which consumers are public
+        id: visibility
+        env:
+          GH_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
+        run: |
+          set -uo pipefail
+          pub=""
+          while read -r repo; do
+            v="$(gh repo view "$repo" --json visibility -q .visibility 2>/dev/null || true)"
+            case "$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')" in
+              private|internal) ;;
+              public)  pub="$pub $repo" ;;
+              *)       pub="$pub $repo"; echo "::warning::${repo} の可視性を判定できませんでした。安全側で public 扱いにします。" ;;
+            esac
+          done < <(grep -vE '^[[:space:]]*(#|$)' ops-sync/consumers.txt)
+          echo "public=${pub# }" >> "$GITHUB_OUTPUT"
+          # 「public が1つも無い」と「このステップが動かなかった」を collect 側で区別するための印。
+          # これが true でなければ collect は全 consumer を public 扱いにする（fail closed）。
+          echo "checked=true" >> "$GITHUB_OUTPUT"
+          echo "public consumers: ${pub:-（なし）}"
+
       - id: collect
         name: Apply proposals (one consumer per run)
         env:
           PR_BODY_PATH: ${{ runner.temp }}/pr-body.md
           CLEANUP_BODY_PATH: ${{ runner.temp }}/cleanup-body.md
+          PUBLIC_CONSUMERS: ${{ steps.visibility.outputs.public }}
+          VISIBILITY_CHECKED: ${{ steps.visibility.outputs.checked }}
         # 出力（提案名・却下理由）を **tee でジョブログに出さない**（MUST。docs/ci-logs.md 手順A-6）。
         # public リポジトリの run ログは world-readable なので、ci-logs の置き場だけ分けても
         # ジョブログ側から同じものが読めてしまう。詳細は提案元 consumer の ci-logs で読む。
@@ -119,6 +146,7 @@ jobs:
         run: cp /tmp/ci-logs/collect-outbox.log /tmp/ci-logs-public/collect-failure.log || true
 
       - name: Open intake PR to ops-sync
+        id: intake-pr
         if: steps.collect.outputs.found == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
@@ -131,7 +159,29 @@ jobs:
           title: ${{ steps.collect.outputs.pr_title }}
           body-path: ${{ runner.temp }}/pr-body.md
 
+      # 提案内容そのものの妥当性は提案元セッションでユーザーが見ている。ここで人間に見せる価値が
+      # あるのは、**提案が書かれた後に前提が変わった**（ベース不一致・判定不能）ことと、常時層の
+      # 肥大化——どちらも提案時点では存在しない情報で、スレッドでの承認では代替できない。
+      # その2つが無いと機械的に確認できたときだけ自動で入れる（判定は collect が行う）。
+      - name: Merge intake PR
+        id: merge-intake
+        if: >-
+          steps.collect.outputs.auto_merge == 'true'
+          && steps.intake-pr.outputs.pull-request-url != ''
+          && steps.intake-pr.outputs.pull-request-operation != 'closed'
+        env:
+          GH_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
+          PR_URL: ${{ steps.intake-pr.outputs.pull-request-url }}
+        run: |
+          if gh pr merge --squash "$PR_URL"; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::intake PR の自動マージに失敗しました（PR は open のまま残します）: $PR_URL"
+          fi
+
       - name: Open cleanup PR to consumer (remove/reject processed proposals)
+        id: cleanup-pr
         if: steps.collect.outputs.consumer_changed == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
@@ -143,6 +193,39 @@ jobs:
           commit-message: 'chore: ops-sync が処理した提案を outbox から整理'
           title: ${{ steps.collect.outputs.cleanup_title }}
           body-path: ${{ runner.temp }}/cleanup-body.md
+
+      # cleanup をマージすると提案が outbox から消える＝オーナーが取り込み PR を close して却下する
+      # 逃げ道が無くなる。なので**取り込みが実際に入った後**にだけ掃除する。掃除してよいのは4通り:
+      #   1. 取り込み PR が実際にマージされた
+      #   2. 却下だけの run（applied=0）＝取り込み PR 自体が無く、オーナーの判断待ちも無い
+      #   3. **取り込み PR に差分が出ず、PR も作られなかった**（url が空）。提案は有効だが ops-sync 側は
+      #      無変更、というケースが実在する（例: 対象タスクが既に存在しない task-done・現在の内容と
+      #      同一の全文置換）。close する対象も巻き戻る変更も無い。
+      #   4. **既存の取り込み PR が差分消滅で close された**（operation=closed）。3 と同じ「無変更」だが、
+      #      前の run で PR を作ってあると create-pull-request は空 url ではなく**既存 PR を close して
+      #      その url を返す**ので、url の有無だけでは 3 と区別できない（レビュー待ちで保留された提案の
+      #      内容が、その後べつの経路で正本に入ると起きる）。
+      # 2〜4 を人間待ちにすると、その提案が最古に居座って全 consumer の提案を永久に止める。
+      - name: Merge consumer cleanup PR
+        id: merge-cleanup
+        if: >-
+          steps.cleanup-pr.outputs.pull-request-url != ''
+          && (steps.collect.outputs.applied == '0'
+              || steps.merge-intake.outputs.merged == 'true'
+              || steps.intake-pr.outputs.pull-request-url == ''
+              || steps.intake-pr.outputs.pull-request-operation == 'closed')
+        env:
+          GH_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
+          PR_URL: ${{ steps.cleanup-pr.outputs.pull-request-url }}
+        run: |
+          # 失敗を握りつぶすと「提案は outbox に残っているのに run は緑」になり、次回以降も同じ提案が
+          # 最古に居座り続ける。結果は output に残し、最後の判定ステップで run を失敗させる。
+          if gh pr merge --squash "$PR_URL"; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::cleanup PR の自動マージに失敗しました（PR は open のまま残します）: $PR_URL"
+          fi
 
       # ── 保守バッチ: 役目を終えたトゥームストーンの掃除 ─────────────────────────
       # 上の collect が ops-sync チェックアウトを取り込み PR 用に書き換えるため、
@@ -208,3 +291,47 @@ jobs:
           run-id: ${{ github.run_id }}
           commit-message: "ci-logs: collect-outbox (run ${{ github.run_id }})"
           token: ${{ secrets.OPS_SYNC_TOKEN }}
+
+      # ── 人間を待っているものを run の失敗として立てる ────────────────────────
+      # 自動マージが通る run は緑で終わる＝**赤は「人間が見るまで進まないものがある」の意味**になる。
+      # 自動マージを入れる前は、レビュー待ちの提案は open PR として残るのが唯一の信号だったが、
+      # 通常経路が自動で片付くようになると、残るものだけが見えていないと気づけない。
+      # 却下も同じ: cleanup を自動マージすると差し戻しが静かに完了してしまうので、ここで立てる。
+      # 最後に置くのは、この失敗で ci-logs の publish や掃除を巻き添えにしないため。
+      - name: Flag anything waiting on a human
+        if: always()
+        env:
+          APPLIED: ${{ steps.collect.outputs.applied }}
+          REJECTED: ${{ steps.collect.outputs.rejected }}
+          HOLDS: ${{ steps.collect.outputs.hold_count }}
+          CONSUMER: ${{ steps.collect.outputs.consumer }}
+          INTAKE_URL: ${{ steps.intake-pr.outputs.pull-request-url }}
+          INTAKE_OP: ${{ steps.intake-pr.outputs.pull-request-operation }}
+          INTAKE_MERGED: ${{ steps.merge-intake.outputs.merged }}
+          CLEANUP_URL: ${{ steps.cleanup-pr.outputs.pull-request-url }}
+          CLEANUP_MERGED: ${{ steps.merge-cleanup.outputs.merged }}
+        run: |
+          set -u
+          waiting=0
+          # 提案は取り込んだが自動マージしなかった（＝可視性・ベース不一致・判定不能・肥大化・タスク名衝突）。
+          # マージすべき PR がそもそも無い2ケースは対象外にする:
+          #   - INTAKE_URL が空 … 差分が出ず PR が作られなかった
+          #   - INTAKE_OP=closed … 既存 PR が差分消滅で close された（url は残るので空判定では拾えない）
+          if [ -n "${APPLIED}" ] && [ "${APPLIED}" != "0" ] \
+             && [ -n "${INTAKE_URL}" ] && [ "${INTAKE_OP}" != "closed" ] \
+             && [ "${INTAKE_MERGED}" != "true" ]; then
+            echo "::error::取り込み PR がレビュー待ちです（保留 ${HOLDS:-?} 件・提案元 ${CONSUMER}）: ${INTAKE_URL}"
+            waiting=1
+          fi
+          # cleanup のマージを試みて失敗した（"false" は試行して失敗したときだけ入る）。握りつぶすと
+          # 提案が outbox に残ったまま run が緑になり、同じ提案が最古に居座って全 consumer を止める。
+          if [ "${CLEANUP_MERGED}" = "false" ]; then
+            echo "::error::outbox 掃除 PR を自動マージできませんでした。提案が ${CONSUMER} の outbox に残り、後続の提案が止まります: ${CLEANUP_URL}"
+            waiting=1
+          fi
+          # 不正な提案を差し戻した（提案元のエージェントが書き直す必要がある）
+          if [ -n "${REJECTED}" ] && [ "${REJECTED}" != "0" ]; then
+            echo "::error::不正な提案 ${REJECTED} 件を ${CONSUMER} の outbox/rejected/ へ差し戻しました。理由は提案元の ci-logs を参照。"
+            waiting=1
+          fi
+          exit "$waiting"

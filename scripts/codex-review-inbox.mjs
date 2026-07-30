@@ -9,8 +9,10 @@
 //     未対応 → 一覧に載る／対応して resolve → 次の run で消える。別途の管理表を持たないのでずれない。
 //   - **消える条件は「resolve された」だけ**。直近スキャンの窓から外れただけで消えないよう、前回の全体
 //     一覧に載っていた PR は名指しで再確認する（持ち越し）。前回の出力が持ち越しの入力を兼ねる。
-//   - **読めなかったものは落とさない**。取得に失敗したリポジトリ・PR は「取得失敗」行として残す
-//     （黙って短い一覧を出すと、指摘が消えたのか読めなかったのか区別できず fail-open になる）。
+//   - **読めなかったものは落とさない**。取得に失敗したリポジトリ・PR、および**レビュースレッドを
+//     1ページ（50件）で読み切れなかった PR** は「取得失敗」行として残す（黙って短い一覧を出すと、
+//     指摘が消えたのか読めなかったのか区別できず fail-open になる）。workflow はこの件数で run を
+//     失敗させるので、読み残しは緑にならない。
 //
 // 入力（環境変数）:
 //   CRI_TOKEN          GitHub トークン（対象リポジトリの Pull requests: read が要る）
@@ -36,8 +38,11 @@
 //     PR 必須の main へ直接 push せず、private の全体一覧だけに載せる。
 //   - stdout のサマリ。**ops-sync の ci-logs（世界公開）に載るので、件数と repo 名しか出さない**
 //     （MUST NOT: 指摘本文・パスをログに出す。private リポジトリの内容が公開に落ちる）。
+//   - outputs。`merged_unresolved`（マージ済み PR に残っている件数）と `merged_unresolved_repos`
+//     （その repo 名）は、workflow が run を失敗させる判定に使う。一覧に積むだけでは
+//     **誰も見に行かない限り気づけない**ため（→ workflow の「Flag …」ステップ）。
 //
-// 終了コード: 常に 0。
+// 終了コード: 常に 0（失敗判定は workflow 側で行う。ここで落とすと一覧の書き出しが飛ぶ）。
 //
 // 内容が実質変わらないファイルは書き換えない（生成時刻だけの差分でコミットが立たないように）。
 
@@ -183,7 +188,16 @@ function loadCarriedPrs(path) {
 function collectFromPr(repo, pr) {
   if (!pr) return 0;
   seenPrs.add(`${repo}#${pr.number}`);
-  if (pr.reviewThreads?.pageInfo?.hasNextPage) truncated.push(`${repo}#${pr.number}`);
+  // レビュースレッドが1ページ（50件）に収まらない PR は、2ページ目以降を**見ていない**。
+  // 注記だけ出して緑で流すと「指摘ゼロ」と「読み切れていない」が区別できず、この一覧が防ぐはずの
+  // fail-open そのものになる（workflow はこの failures の件数で run を失敗させる）。
+  if (pr.reviewThreads?.pageInfo?.hasNextPage) {
+    truncated.push(`${repo}#${pr.number}`);
+    failures.push({
+      repo: `${repo}#${pr.number}`,
+      reason: 'review threads exceed one page (50); later pages were not inspected',
+    });
+  }
   let found = 0;
   for (const th of pr.reviewThreads?.nodes || []) {
     if (!th || th.isResolved) continue;
@@ -440,3 +454,10 @@ setOutput('open_findings', String(findings.length));
 setOutput('merged_unresolved', String(mergedCount));
 setOutput('failures', String(failures.length));
 setOutput('files_changed', String(filesChanged));
+// マージ済み PR に残っている指摘を抱えた repo 名。workflow がこれを使って run を失敗させ、
+// 「一覧に積まれたが誰も拾っていない」状態を可視化する（→ 下記 setOutput の直前のコメント）。
+// repo 名は件数と同じく公開してよい情報（指摘本文・パスは出さない）。
+setOutput(
+  'merged_unresolved_repos',
+  [...new Set(findings.filter((f) => f.prMerged).map((f) => f.repo))].sort().join(' '),
+);
