@@ -100,12 +100,13 @@ consumer へ伝播する（追加しかできない実装だと撤去がドリ�
 | `.github/workflows/sync.yml` | （下り）main の変更＋cron（1日1回の再適用＝手編集ドリフトの自己修復）で各 consumer へ同期 PR を生成し、MERGE_MODE に応じてマージ |
 | `consumers.txt` | 配布先リポジトリ（`owner/repo`） |
 | `scripts/collect-outbox.mjs` | （上り）consumer の `.ops-sync/outbox/*.md` 提案を種別に応じて反映（1 consumer 分をまとめて処理・不正な提案は `rejected/` へ差し戻し） |
-| `.github/workflows/collect-outbox.yml` | （上り）cron（約6時間ごと）＋手動で起動、取り込み PR＋outbox 掃除 PR を生成。あわせてトゥームストーン掃除（保守） |
+| `.github/workflows/collect-outbox.yml` | （上り）cron（約6時間ごと）＋手動で起動、取り込み PR＋outbox 掃除 PR を生成。あわせてトゥームストーン掃除（保守）。処理ログ（提案名・却下理由）は**提案元 consumer の `ci-logs`** へ、ops-sync には件数だけ |
 | `scripts/archive-task-history.mjs` | （保守）`docs/history-inbox/` のフラグメントを `docs/AI_TASK_HISTORY.md` へ統合し、保持量超過分を `docs/history-archive/` へ移す |
-| `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ops-sync＋全 consumer を巡回し、未統合フラグメントか超過エントリがあれば統合＋アーカイブ PR を生成・マージ |
+| `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ops-sync＋全 consumer を巡回し、未統合フラグメントか超過エントリがあれば統合＋アーカイブ PR を生成・マージ。処理ログ（フラグメント名）は**対象リポジトリの `ci-logs`** へ、ops-sync には件数だけ |
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer から対象が消えた）を刈る |
 | `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から**未 resolve の Codex レビュースレッド**を集め、全体一覧＋**private consumer 分だけ**のスライスに落とす |
 | `.github/workflows/codex-review-inbox.yml` | （信号）cron（毎時）＋手動で上記を実行し、全体一覧を private の `.ops-sync/codex-review-inbox-all.md`、private consumer の自分の分を `.ops-sync/codex-review-inbox.md` へ直接 push（内容に変化があるときだけ）。public repo は全体一覧だけ |
+| `shared/.github/actions/publish-ci-logs/` | （下り・ファイル）恒久ログ（`ci-logs` ブランチ）への publish。既定は実行リポジトリだが、`repository:` 入力で**他リポジトリの `ci-logs`** に出せる（下記「ログの公開先は『何についてのログか』で決める」） |
 | `shared/.github/actions/publish-ephemeral/` | （下り・ファイル）揮発ブランチへの publish。毎回 orphan 1コミットへ書き換え＋TTL 失効＋`--force-with-lease`。恒久ログ用の `publish-ci-logs` と対（下記「揮発する出力と恒久ログを分ける」） |
 
 consumer 側に必要な配線は**無い**（workflow・Secret とも不要）。consumer を増やすときは
@@ -342,6 +343,30 @@ cron 専用で外部入力を取らないため残留する（枠はアカウン
 
 **`ci-logs` は2箇所になる**: quota 信号は ops-sync、net-fetch の結果は ops-runner。分散モードのエージェントは
 「枠の信号は ops-sync、取得結果は実行したリポジトリ」と読み分ける（→ `docs/net-fetch.md`）。
+
+## ログの公開先は「何についてのログか」で決める
+
+ops-sync は public なので、**その `ci-logs` に出したものは世界公開の恒久記録**になる（消しても履歴に残る）。
+一方 ops-sync の cross-repo バッチ（sync / collect-outbox / archive-task-history / codex-review-inbox）は
+**private consumer の中身を読んで動く**。素直に「実行したリポジトリの `ci-logs`」に出すと、private の
+ファイル名・本文が public 側に落ちる。実際 `archive-task-history` は統合・削除したフラグメントのファイル名
+（＝private リポジトリのタスクスラッグ）を毎日 ops-sync の `ci-logs` に出していた。
+
+**規則**（手順は `docs/ci-logs.md` 手順A-6）:
+
+- **詳細ログ（対象の中身に由来するもの）は対象リポジトリ自身の `ci-logs` へ**。`publish-ci-logs` の
+  `repository:` 入力で宛先を変える。可視性が対象の可視性に自動で一致し、読み手（そのリポジトリで
+  作業するエージェント）は自分のリポジトリで読める。
+- **実行側（ops-sync）には件数・repo 名・成否・PR URL までのロールアップだけ**。集計値はスクリプトの
+  `$GITHUB_OUTPUT` から受け取り、公開用の要約を作り分ける（詳細ログを grep で削らない）。
+- quota 信号は**逆に public でなければならない**（`quota/actions/actions.json`）。読み手は全リポジトリの
+  エージェントで、public な ops-runner も含む。これを private に移すと「能力ゼロで読める」が崩れる。
+  だから band しか出さない（→「Actions 月枠の信号」）。
+
+「宛先を1つの private リポジトリに寄せる」ではなく**対象リポジトリごとに散らす**のは、上の2点
+（可視性の自動一致・読み手と同一リポジトリ）が同時に満たせるのはこの形だけだから。Codex レビューの
+全体一覧を private に寄せているのは、あれが**人が1本開いてトリアージする成果物**で、読み手も置き場も
+1つだから（性質が違う）。
 
 ## 揮発する出力と恒久ログを分ける
 

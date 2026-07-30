@@ -13,10 +13,19 @@
 // .github/workflows/archive-task-history.yml（ops-sync 集中バッチ）から実行する。
 //
 // 使い方: node archive-task-history.mjs <repo root>
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
 
 const KEEP_WORKDAYS = 2;
+
+// 集計値だけを GITHUB_OUTPUT へ出す。ワークフローはこれだけで ops-sync（public）側のロールアップを
+// 組み立てる——このログ本体はフラグメントのファイル名（＝private リポジトリのタスクスラッグ）を
+// 含むので、対象リポジトリの ci-logs にしか出せない（→ shared/docs/ci-logs.md「ログの公開先」）。
+const counts = { status: 'noop', consolidated: 0, kept: 0, moved: 0, archived_years: 0 };
+const emitCounts = () => {
+  if (!process.env.GITHUB_OUTPUT) return;
+  appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(counts).map(([k, v]) => `${k}=${v}\n`).join(''));
+};
 
 const [, , repoRoot] = process.argv;
 if (!repoRoot) {
@@ -95,6 +104,7 @@ if (existsSync(inboxDir)) {
 
 if (mainBlocks.length === 0 && inboxBlocks.length === 0) {
   console.log('no entries; nothing to do');
+  emitCounts();
   process.exit(0);
 }
 
@@ -117,6 +127,7 @@ const overRetention = dates.length > KEEP_WORKDAYS;
 // inbox 取り込みも保持量超過も無ければ何もしない（空 PR を作らない）。
 if (consumedFiles.length === 0 && !overRetention) {
   console.log(`within retention (${dates.length} workday(s)), no inbox fragments; nothing to do`);
+  emitCounts();
   process.exit(0);
 }
 
@@ -170,3 +181,10 @@ console.log(
   `consolidated ${inboxBlocks.length} inbox entr(ies); ` +
   `kept ${undated.length + keptDated.length} entr(ies) across ${[...keep].join(', ') || '(none)'}; moved ${moved.length}`,
 );
+
+counts.status = 'changed';
+counts.consolidated = inboxBlocks.length;
+counts.kept = undated.length + keptDated.length;
+counts.moved = moved.length;
+counts.archived_years = byYear.size;
+emitCounts();

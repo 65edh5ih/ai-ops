@@ -33,8 +33,20 @@ inputs:
   commit-message:
     description: Commit message for the ci-logs update.
     required: true
+  repository:
+    description: >-
+      Target repository (`owner/repo`) whose `ci-logs` branch receives the
+      slice. Defaults to the repository running the workflow. Set this when the
+      log is *about* another repository (a cross-repo batch), so that log
+      visibility follows the subject repository's visibility and the agents who
+      read it find it in their own repository. Requires a token with
+      contents:write on that repository.
+    required: false
+    default: ""
   token:
-    description: "GitHub token with contents:write permission on this repository."
+    description: >-
+      GitHub token with contents:write permission on the target repository
+      (this repository unless `repository` is set).
     required: true
 runs:
   using: composite
@@ -48,7 +60,7 @@ runs:
         RUN_ID: ${{ inputs.run-id }}
         MSG: ${{ inputs.commit-message }}
         GH_TOKEN: ${{ inputs.token }}
-        REPO: ${{ github.repository }}
+        REPO: ${{ inputs.repository || github.repository }}
       run: |
         set -uo pipefail
 
@@ -153,6 +165,6 @@ runs:
         done
 
         if [ "$pushed" != "1" ]; then
-          echo "::warning::publish-ci-logs: failed to push '${DEST}' to ci-logs after retries."
+          echo "::warning::publish-ci-logs: failed to push '${DEST}' to ${REPO} ci-logs after retries."
         fi
         exit 0

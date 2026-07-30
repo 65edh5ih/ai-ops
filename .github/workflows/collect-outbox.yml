@@ -41,10 +41,20 @@ jobs:
         with:
           path: ops-sync
 
-      - name: Set up log directory
+      # ログは2つに分ける（→ docs/ci-logs.md「ログの公開先」）。処理ログは提案のファイル名と却下理由を
+      # 含み、それは提案元 consumer の中身なので、public な ops-sync ではなく**提案元リポジトリ自身の
+      # ci-logs** へ出す。ops-sync 側には件数・種別だけのロールアップを残す。
+      - name: Set up log directories
         run: |
-          mkdir -p /tmp/ci-logs
+          mkdir -p /tmp/ci-logs /tmp/ci-logs-public
           cat > /tmp/ci-logs/summary.md << EOF
+          # Collect outbox proposals (detail)
+          - Run: ${{ github.run_id }}
+          - Triggered by: ${{ github.event_name }}
+          - ops-sync ref: ${{ github.sha }}
+          - Started: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          EOF
+          cat > /tmp/ci-logs-public/summary.md << EOF
           # Collect outbox proposals
           - Run: ${{ github.run_id }}
           - Triggered by: ${{ github.event_name }}
@@ -67,17 +77,34 @@ jobs:
         env:
           PR_BODY_PATH: ${{ runner.temp }}/pr-body.md
           CLEANUP_BODY_PATH: ${{ runner.temp }}/cleanup-body.md
-        run: node ops-sync/scripts/collect-outbox.mjs ops-sync/AGENTS_COMMON.md consumers ops-sync 2>&1 | tee /tmp/ci-logs/collect-outbox.log
+        # pipefail: スクリプトの失敗を tee が飲み込まないようにする（docs/ci-logs.md 手順A-2）
+        run: |
+          set -uo pipefail
+          node ops-sync/scripts/collect-outbox.mjs ops-sync/AGENTS_COMMON.md consumers ops-sync 2>&1 \
+            | tee /tmp/ci-logs/collect-outbox.log
 
       - name: Record collect result
         if: always()
         run: |
-          echo "- Found: ${{ steps.collect.outputs.found }}" >> /tmp/ci-logs/summary.md
-          echo "- Type: ${{ steps.collect.outputs.type }}" >> /tmp/ci-logs/summary.md
-          echo "- Consumer: ${{ steps.collect.outputs.consumer }}" >> /tmp/ci-logs/summary.md
-          echo "- Proposals: ${{ steps.collect.outputs.proposal }}" >> /tmp/ci-logs/summary.md
-          echo "- Applied/Rejected/Deferred: ${{ steps.collect.outputs.applied }}/${{ steps.collect.outputs.rejected }}/${{ steps.collect.outputs.deferred }}" >> /tmp/ci-logs/summary.md
-          echo "- Finished: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> /tmp/ci-logs/summary.md
+          # 詳細（提案のファイル名を含む）＝提案元 consumer 行き
+          {
+            echo "- Found: ${{ steps.collect.outputs.found }}"
+            echo "- Type: ${{ steps.collect.outputs.type }}"
+            echo "- Consumer: ${{ steps.collect.outputs.consumer }}"
+            echo "- Proposals: ${{ steps.collect.outputs.proposal }}"
+            echo "- Applied/Rejected/Deferred: ${{ steps.collect.outputs.applied }}/${{ steps.collect.outputs.rejected }}/${{ steps.collect.outputs.deferred }}"
+            echo "- Finished: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } >> /tmp/ci-logs/summary.md
+          # 公開ロールアップ＝件数・種別・repo 名まで（提案のファイル名・却下理由は出さない）
+          {
+            echo "- Result: ${{ steps.collect.outputs.consumer != '' && 'processed' || 'no proposals' }}"
+            echo "- Found: ${{ steps.collect.outputs.found }}"
+            echo "- Type: ${{ steps.collect.outputs.type }}"
+            echo "- Consumer: ${{ steps.collect.outputs.consumer }}"
+            echo "- Applied/Rejected/Deferred: ${{ steps.collect.outputs.applied }}/${{ steps.collect.outputs.rejected }}/${{ steps.collect.outputs.deferred }}"
+            echo "- Detail log (when a consumer was processed): \`collect-outbox/latest\` on that consumer's \`ci-logs\` branch"
+            echo "- Finished: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } >> /tmp/ci-logs-public/summary.md
 
       - name: Open intake PR to ops-sync
         if: steps.collect.outputs.found == 'true'
@@ -113,8 +140,12 @@ jobs:
         with:
           path: ops-sync-prune
 
+      # 掃除対象は ops-sync 自身の sync-deletions.txt（public な正本の中身）なので公開側へ。
       - name: Prune completed tombstones from sync-deletions.txt
-        run: node ops-sync/scripts/prune-tombstones.mjs ops-sync-prune consumers 2>&1 | tee /tmp/ci-logs/prune-tombstones.log
+        run: |
+          set -uo pipefail
+          node ops-sync/scripts/prune-tombstones.mjs ops-sync-prune consumers 2>&1 \
+            | tee /tmp/ci-logs-public/prune-tombstones.log
 
       - name: Open tombstone prune PR
         id: prune-pr
@@ -139,11 +170,26 @@ jobs:
           gh pr merge --squash "${{ steps.prune-pr.outputs.pull-request-url }}" \
             || echo "::warning::merge failed; PR left open: ${{ steps.prune-pr.outputs.pull-request-url }}"
 
-      - name: Publish CI logs
+      # 詳細ログ（提案名・却下理由）→ この run で処理した提案元 consumer の ci-logs。
+      # 提案が1件も無い run では consumer が決まらないので publish しない（出す相手がいない）。
+      - name: Publish detailed CI logs to the source consumer
+        if: always() && steps.collect.outputs.consumer != ''
+        uses: ./ops-sync/.github/actions/publish-ci-logs
+        with:
+          repository: ${{ steps.collect.outputs.consumer }}
+          source-dir: /tmp/ci-logs
+          dest: collect-outbox/latest
+          history-dir: collect-outbox/history
+          retention-days: "30"
+          run-id: ${{ github.run_id }}
+          commit-message: "ci-logs: collect-outbox (run ${{ github.run_id }})"
+          token: ${{ secrets.OPS_SYNC_TOKEN }}
+
+      - name: Publish public roll-up
         if: always()
         uses: ./ops-sync/.github/actions/publish-ci-logs
         with:
-          source-dir: /tmp/ci-logs
+          source-dir: /tmp/ci-logs-public
           dest: collect-outbox/latest
           history-dir: collect-outbox/history
           retention-days: "30"
