@@ -11,6 +11,15 @@ description: >-
   warning without failing the job, unless the caller sets
   `fail-on-publish-error` (do that wherever a green run would be read as proof
   the branch changed).
+
+  NOT a deletion mechanism. Rewriting the branch only makes the previous commit
+  unreachable; the remote keeps unreachable objects, and on GitHub anyone who
+  recorded a commit or blob SHA while the branch was live can still fetch that
+  object afterwards. Nothing here (and no GitHub API) forces the remote to
+  garbage-collect, so a successful write — and any TTL, however short — bounds
+  *accumulation and discoverability*, never disclosure. Treat anything published
+  to a public repository through this action as disclosed permanently at publish
+  time, and keep data that must not be disclosed off the public path entirely.
 inputs:
   source-dir:
     description: >-
@@ -53,12 +62,15 @@ inputs:
     default: ""
   drop-slice:
     description: >-
-      Name of a single slice under `slice-root` to delete regardless of its age,
-      in addition to the normal expiry pass. Used for cleanup-on-read: once the
+      Names of slices under `slice-root` to delete regardless of their age, in
+      addition to the normal expiry pass. Used for cleanup-on-read: once the
       agent has consumed a result there is no reason to keep it until the TTL.
-      Only a bare slice name is accepted (no `/`, no `.`/`..`); anything else is
-      refused so this input cannot be used to delete arbitrary paths. Empty
-      (the default) means "drop nothing extra".
+      One name per line (blank lines ignored), so a caller can retire every
+      slice a single request may have produced -- net-fetch cleanup passes both
+      the request id and the `_invalid-<digest>` slice a rejected request falls
+      back to. Only bare slice names are accepted (no `/`, no `.`/`..`);
+      anything else is refused so this input cannot be used to delete arbitrary
+      paths. Empty (the default) means "drop nothing extra".
     required: false
     default: ""
   fail-on-publish-error:
@@ -146,18 +158,26 @@ runs:
         # is world-readable. Correlation uses a short digest instead. Deliberately NOT duplicating
         # net-fetch.sh's SECRET_PATTERNS here -- keeping a second copy of that list is exactly the
         # drift AGENTS_COMMON warns about, and "never log it" covers the leak without a copy.
-        drop_tag=""
-        if [ -n "$DROP_SLICE" ]; then
-          case "$DROP_SLICE" in
+        # drop-slice is a list (one bare name per line). Validate every line up front and keep the
+        # accepted names alongside their log tags, so the retry loop below neither re-validates nor
+        # re-hashes. A single bad line refuses the whole run rather than silently dropping a subset.
+        drop_names=()
+        drop_tags=()
+        while IFS= read -r drop_line; do
+          [ -n "$drop_line" ] || continue
+          case "$drop_line" in
             # `.` must be listed on its own: it passes the charset test ('.' is allowed inside a
             # name) and does not match *..*, yet `rm -rf <root>/.` targets SLICE_ROOT itself.
+            # The charset test also rejects CR, so a CRLF-separated list cannot smuggle a name
+            # through with a trailing carriage return.
             *[!A-Za-z0-9._-]*|*..*|.)
-              echo "::error::publish-ephemeral: drop-slice must match [A-Za-z0-9._-]+ and must not contain '..'. Refusing (value not echoed: it may hold a secret)."
+              echo "::error::publish-ephemeral: every drop-slice line must match [A-Za-z0-9._-]+ and must not contain '..'. Refusing (value not echoed: it may hold a secret)."
               exit 1
               ;;
           esac
-          drop_tag="sha256:$(printf '%s' "$DROP_SLICE" | sha256sum | cut -c1-12)"
-        fi
+          drop_names+=("$drop_line")
+          drop_tags+=("sha256:$(printf '%s' "$drop_line" | sha256sum | cut -c1-12)")
+        done <<< "$DROP_SLICE"
 
         tmp="$(mktemp -d)"
         cleanup() { rm -rf "$tmp"; }
@@ -208,17 +228,18 @@ runs:
             fi
           done < <(find "${tmp}/${SLICE_ROOT}" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
 
-          # ── drop one named slice regardless of age (cleanup-on-read) ──────
-          # DROP_SLICE is validated as a bare name before the retry loop, so by here it
-          # cannot escape SLICE_ROOT.
-          if [ -n "$DROP_SLICE" ]; then
-            if [ -d "${tmp}/${SLICE_ROOT}/${DROP_SLICE}" ]; then
-              echo "publish-ephemeral: dropping slice ${drop_tag} (cleanup-on-read)"
-              rm -rf "${tmp:?}/${SLICE_ROOT}/${DROP_SLICE}"
+          # ── drop the named slices regardless of age (cleanup-on-read) ─────
+          # Every name was validated as a bare name before the retry loop, so by here none
+          # can escape SLICE_ROOT.
+          local i
+          for i in "${!drop_names[@]}"; do
+            if [ -d "${tmp}/${SLICE_ROOT}/${drop_names[$i]}" ]; then
+              echo "publish-ephemeral: dropping slice ${drop_tags[$i]} (cleanup-on-read)"
+              rm -rf "${tmp:?}/${SLICE_ROOT}/${drop_names[$i]}"
             else
-              echo "publish-ephemeral: slice ${drop_tag} not present (already gone); nothing to drop."
+              echo "publish-ephemeral: slice ${drop_tags[$i]} not present (already gone); nothing to drop."
             fi
-          fi
+          done
 
           # ── write our own slice ──────────────────────────────────────────
           if [ "$PRUNE_ONLY" != "true" ]; then
