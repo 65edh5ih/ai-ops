@@ -38,6 +38,16 @@ inputs:
       retain).
     required: false
     default: "3"
+  drop-slice:
+    description: >-
+      Name of a single slice under `slice-root` to delete regardless of its age,
+      in addition to the normal expiry pass. Used for cleanup-on-read: once the
+      agent has consumed a result there is no reason to keep it until the TTL.
+      Only a bare slice name is accepted (no `/`, no `.`/`..`); anything else is
+      refused so this input cannot be used to delete arbitrary paths. Empty
+      (the default) means "drop nothing extra".
+    required: false
+    default: ""
   prune-only:
     description: >-
       When "true", only expire old slices (no slice is written). Used by the
@@ -61,6 +71,7 @@ runs:
         SLICE_ROOT: ${{ inputs.slice-root }}
         RETENTION_DAYS: ${{ inputs.retention-days }}
         PRUNE_ONLY: ${{ inputs.prune-only }}
+        DROP_SLICE: ${{ inputs.drop-slice }}
         MSG: ${{ inputs.commit-message }}
         GH_TOKEN: ${{ inputs.token }}
         REPO: ${{ github.repository }}
@@ -83,6 +94,18 @@ runs:
           ''|*[!0-9]*) RETENTION_DAYS=3 ;;
         esac
         [ "$RETENTION_DAYS" -gt 0 ] || RETENTION_DAYS=3
+
+        # Reject a malformed drop-slice here, NOT inside attempt_publish: the retry loop below
+        # treats every non-zero return as "branch moved or transient", so a validation error
+        # raised in there would be retried 5x and then downgraded to a warning with exit 0.
+        if [ -n "$DROP_SLICE" ]; then
+          case "$DROP_SLICE" in
+            */*|.|..)
+              echo "::error::publish-ephemeral: drop-slice must be a bare slice name (no '/', not '.'/'..'); refusing '${DROP_SLICE}'."
+              exit 1
+              ;;
+          esac
+        fi
 
         tmp="$(mktemp -d)"
         cleanup() { rm -rf "$tmp"; }
@@ -132,6 +155,18 @@ runs:
               rm -rf "$dir"
             fi
           done < <(find "${tmp}/${SLICE_ROOT}" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+
+          # ── drop one named slice regardless of age (cleanup-on-read) ──────
+          # DROP_SLICE is validated as a bare name before the retry loop, so by here it
+          # cannot escape SLICE_ROOT.
+          if [ -n "$DROP_SLICE" ]; then
+            if [ -d "${tmp}/${SLICE_ROOT}/${DROP_SLICE}" ]; then
+              echo "publish-ephemeral: dropping ${DROP_SLICE} (cleanup-on-read)"
+              rm -rf "${tmp:?}/${SLICE_ROOT}/${DROP_SLICE}"
+            else
+              echo "publish-ephemeral: ${DROP_SLICE} not present (already gone); nothing to drop."
+            fi
+          fi
 
           # ── write our own slice ──────────────────────────────────────────
           if [ "$PRUNE_ONLY" != "true" ]; then

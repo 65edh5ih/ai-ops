@@ -21,41 +21,41 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
   - 記法: 1行1ホスト。完全一致か `*.example.com`（サブドメインのみ・素の `example.com` には不一致）。
 - **`<request_id>`**: `[A-Za-z0-9._-]+`。結果スライスのパスになる。取得ごとに一意にする（衝突回避）。
 - **結果ブランチ `net-fetch-results`**（実行したリポジトリ内）。スライスは `net-fetch/<request_id>/`。
+  **応答本文の出口はこのブランチだけ**（ジョブログには出さない。理由は下記）。
   **このブランチは揮発する**——書き込みのたびに orphan 1コミットへ書き換えられ、**3日（TTL）を過ぎた
-  スライスは失効して消える**。失効の判定が走るのは「次の書き込み」と「日次の掃除ジョブ（sweep）」で、
-  sweep は **public リポジトリでだけ**動く（private では Actions 枠を使わないため skip。理由は
-  `net-fetch.yml` の `schedule:` のコメント）。よって実際の最大保持はモードで違う:
-  - **集約モード（public な ops-runner）**: TTL＋最大1日（取得が続いている間は TTL ちょうどで消える）。
-  - **分散モード（private リポジトリ）**: 失効は次の取得時にしか走らないので、**次に net-fetch を
-    使うまで**最後のスライスが残る（上限なし）。非公開なので世界公開にはならないが、
-    「3日で消える」と当てにしないこと。消したいときは結果ブランチを手で削除する
-    （`git push origin --delete net-fetch-results`）。
+  スライスは失効して消える**。失効・削除が走る契機は3つある:
+  - **読了後の cleanup dispatch**（主経路・MUST → 手順6）: 読み終えたスライスを齢に関係なく即削除する。
+    **公開時間が TTL の3日ではなく実際の読み取り時間（数分）で終わる**のはこの経路のおかげ。
+    使ったときだけ 1 run なので、休眠中は 1 分も課金されない。
+  - **次の取得**: publish のたびに TTL 超過スライスを落とす（蓄積の防止）。
+  - **日次 sweep（バックストップ・public のみ）**: cleanup dispatch をし損ねた取りこぼしを拾う。
+    private では skip する——TTL 超過の世界公開を防ぐという便益が非公開では発生しないのに、
+    Actions 分数だけがアカウント枠に課金されるため（→ `net-fetch.yml` の `schedule:` のコメント）。
+
+  したがって cleanup を**しなかった**場合の最大保持はモードで違う: 集約モード（public）は
+  TTL＋最大1日、**分散モード（private）は次の取得まで（上限なし）**。private は非公開なので
+  世界公開にはならないが、「3日で消える」と当てにしないこと。確実に消すなら結果ブランチを手で削除する
+  （`git push origin --delete net-fetch-results`）。
 
   取得結果は
   「読んだら用済みの一次データ」なので、
   恒久ログの `ci-logs` には publish しない（public リポジトリでは削除しても git 履歴に永久に残るため）。
   よって **dispatch したら間を置かずに読むこと**（MUST）。古い取得を後から掘り返す用途には使えない。
 
-  **上の TTL が縛るのは結果ブランチだけ**（重要）。同じ本文は「Echo result to job log」ステップで
-  **ジョブログにも出る**（既定 256 KiB まで）ので、取得内容には寿命が2つある:
-  - **結果ブランチのスライス**: 上記の TTL（git ブランチなので、リポジトリ設定の
-    Artifact and log retention の対象**外**。書き換えられるまで残る）。
-  - **ジョブログの写し**: リポジトリ設定 **Artifact and log retention**（既定 90 日・public は最大 90 日、
-    private は最大 400 日）に従う。TTL では消えない。
-    設定: `https://github.com/<owner>/<repo>/settings/actions`（Settings → Actions → General →
-    Artifact and log retention）。
-
-  つまり **public な集約モードでは、取得内容が TTL の3日を過ぎてもジョブログとして最大 90 日
-  世界公開され続ける**（public リポジトリの run ログは誰でも読める）。日次 sweep で縛れるのは
-  ブランチ側だけなので、**機微を取得しうるものを public 経路に流さない**という原則
-  （→「モード」節）はログ側にも同じだけ効く。集約モードで公開時間を実際に縮めたいときは、
-  ブランチの TTL ではなくこのリポジトリ設定を下げる。
+  **応答本文をジョブログに出さないのはなぜか**: ジョブログは git ブランチではないので上の TTL が
+  効かず、リポジトリ設定 **Artifact and log retention**（1〜90日で設定・既定 90 日）に従って残る。
+  public な集約モードではそれが world-readable のまま残るため、TTL や cleanup で縮めた公開時間が
+  ログ側で無効になっていた。よって本文の出口はブランチ1本に絞り、ログには照合用の最小限
+  （`meta.txt`・本文の `bytes` と `sha256`）だけ出す。**これで読めなくなるランタイムは無い**——
+  dispatch できる権限があれば結果ブランチはコンテンツ取得 API でも読める（下記「エージェントに要る能力」）。
 - **エージェントに要る能力**（この仕組みはツール中立。以下の能力を*何で*満たすかはランタイム依存で、
   GitHub の MCP ツール・`gh` CLI・REST API のどれでもよい）:
   - **対象リポジトリの `net-fetch` workflow を `workflow_dispatch` で起動できる**こと（`actions:write` 相当）。
-  - **結果を読み戻せる**こと。満たし方は2通りあり、どちらでもよい（→ 手順5）: 対象リポジトリの
-    **結果ブランチのファイルを読める**（`git fetch` かコンテンツ取得 API）、または**ジョブログの本文を
-    取得できる**（GitHub の MCP ツール等）。
+    取得と読了後の cleanup の両方にこれを使う（cleanup 用に書き込み権限は要らない——結果ブランチを
+    消すのは workflow 側で、エージェントは dispatch するだけ）。
+  - **結果ブランチのファイルを読める**こと（`git fetch` か**コンテンツ取得 API**。→ 手順5）。
+    API 経路があるので、シェルや git を持たず GitHub の MCP ツールだけのランタイムでも満たせる。
+    応答本文はブランチにしか無い（ジョブログには `meta` と `bytes`/`sha256` だけ）。
   - 集約モードを使うなら追加で、**ops-runner をセッションから参照できる**こと。これは Claude Code on the web の
     `add_repo`（別リポジトリをセッションに足す機能）を前提にした経路。この機能を持たないエージェント
     （Codex / Gemini CLI / OpenHands / Qwen / Cline 等）は、代わりに ops-runner へ dispatch/読み取りできる資格情報を
@@ -134,22 +134,27 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
    ユーザーに依頼する**（MUST。回避のために別経路を勝手に作らない）。
    - 完了条件: run が completed になる。ジョブは allowlist 外や secret 検出でも**失敗しない**（弾いた事実を
      結果に残して緑で終わる）。赤で終わるのはインフラ的 error のときだけ。
-5. **結果を読み戻す**（MUST）。読む内容はどちらの出口でも同じ:
+5. **結果を読み戻す**（MUST）。**結果ブランチ `net-fetch-results` の `net-fetch/<request_id>/`** を読む
+   （`git fetch origin net-fetch-results` してから読むか、コンテンツ取得 API で該当パスを取る）。中身:
    - `status.txt` … 1行目が `ok` / `rejected` / `error`（rejected は2行目に理由）。
    - `response.txt` … 取得本文（secret は伏字済み。`ok` のときのみ）。
    - `meta.txt` … url・http ステータス・生成時刻。
 
-   **出口は2つあり、自分のランタイムで満たせるほうを使う**（どちらも同一内容。速いほうでよい）:
-   - **結果ブランチを読む**: `net-fetch-results` の `net-fetch/<request_id>/`
-     （`git fetch origin net-fetch-results` してから読むか、コンテンツ取得 API で該当パスを取る）。
-   - **ジョブログを読む**: run のログ本文を取得できるなら、`fetch` ジョブ末尾の
-     `===== NET-FETCH META BEGIN =====` 以降に meta と応答本文がそのまま出ている（ブランチを取得せずに
-     1回で読める）。応答本文は既定 256KiB で打ち切られ、超過分は結果ブランチのスライスにのみ入る
-     （打ち切られた旨がログに出る）。
+   ジョブログには**本文は出ない**（`meta.txt` と本文の `bytes`/`sha256` だけ。理由は「前提・パラメータ」の
+   結果ブランチ節）。ログは「取得が成功したか」「読んだ本文が run のものと同一か」の照合に使う。
    - 完了条件: `status.txt` が `ok` で `response.txt` に本文がある。`rejected` なら理由に従い allowlist 追加
      などをして `request_id` を変えて再実行する。
-   - **どちらの出口も使えないときは、停止してユーザーに依頼する**（MUST）。読めないことを理由に、
+   - **結果ブランチを読めないときは、停止してユーザーに依頼する**（MUST）。読めないことを理由に、
      取得できたはずの内容を推測で埋めない（MUST NOT）。
+6. **読了後に cleanup を dispatch する**（MUST）。手順4と同じ workflow を、`request_id`（読んだものと同じ）と
+   **`cleanup: 'true'`** を渡して起動する（`url` は不要）。読了済みスライスが齢に関係なく即削除され、
+   公開時間が TTL の3日ではなく実際の読み取り時間で終わる。
+   - **集約モード（public な ops-runner）では特に省略しない**（MUST NOT）。省略すると取得内容が
+     世界公開のまま最大 TTL＋1日残る。public の Actions は無料なので、この 1 run に枠の心配は要らない。
+   - 分散モード（private）でも同じ手順でよい。省略した場合の残留は「次の取得まで」で、非公開なので
+     露出はしないが、枠を1分使ってでも消したいかはその場の判断でよい。
+   - 取得が `rejected`／`error` で終わった場合も、スライスが作られていれば同じように消せる。
+   - 完了条件: run が completed になる（対象スライスが既に無ければ「nothing to drop」で緑）。
 
 ## 縛り（この仕組みが構造的に保証すること）
 
@@ -164,10 +169,13 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
 - **取得結果が git 履歴に堆積しない**: 結果ブランチは毎回 orphan 1コミットに書き換えられる。削除が
   ツリーにしか効かず履歴に残る恒久ログ（`ci-logs`）とは別扱いにしてある。
   **ただし「一定期間で必ず消える」は保証ではない**（構造的に保証されるのは上の「履歴に堆積しない」まで）。
-  TTL 失効が走るのは「次の書き込み」と「日次 sweep」で、sweep は public のみ——**private の休眠中は
-  最後のスライスが次の取得まで残り、上限が無い**。ジョブログの写しはさらに別寿命
-  （Artifact and log retention・既定 90 日）で、TTL では消えない。確実に消すなら結果ブランチを手で削除する
+  失効が走る契機は「読了後の cleanup dispatch」「次の書き込み」「日次 sweep（public のみ）」で、
+  **cleanup を省いた private の休眠中は最後のスライスが次の取得まで残り、上限が無い**。
+  確実に消すなら手順6の cleanup を必ず実行し、それでも消し切りたいときは結果ブランチを手で削除する
   （`git push origin --delete net-fetch-results`）。詳細は上の「結果ブランチ」節。
+- **応答本文がジョブログに残らない**: 本文の出口は結果ブランチ1本だけ。ジョブログには `meta` と
+  `bytes`/`sha256` しか出ないので、ブランチ側を消せば本文はどこにも残らない（ログは
+  Artifact and log retention に従って残るが、そこに本文は無い）。
 
 ## よくある失敗
 
@@ -187,5 +195,9 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
   artifact と run ログの zip はダウンロード URL が `results-receiver.actions.githubusercontent.com` や
   blob ホストへ 302 し、egress 制限下の実行環境はこれらを拒否する（実測: CONNECT に 403・到達不可）。
   `gh run download` も REST も同じホストに当たるため、全エージェントで読み戻せなくなる。
-  **egress 制限下で確実に届くのは git（`git fetch`）と `api.github.com` だけ**——だから出口はブランチと
-  ジョブログの2つで、揮発は artifact ではなく TTL とブランチ書き換えで実現している。
+  **egress 制限下で確実に届くのは git（`git fetch`）と `api.github.com` だけ**——だから本文の出口は
+  結果ブランチで、揮発は artifact ではなく cleanup dispatch・TTL・ブランチ書き換えで実現している。
+- **読了後の cleanup を省く**: 手順6を飛ばすと、読み終えて用済みになった本文が TTL いっぱい
+  （集約モードなら世界公開のまま最大4日）残る（MUST NOT: 集約モードで省略する）。cleanup は 1 run で、
+  public では無料。「あとで sweep が消すから」は理由にならない——sweep は取りこぼし用の
+  バックストップで、public でしか動かず、しかも最大1日遅れる。

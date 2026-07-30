@@ -10,10 +10,11 @@ name: Net fetch
 # 持ち込む経路を OPS_SYNC_TOKEN のあるリポジトリに置かないため（→ docs/ops-sync-design.md「実行基盤の分離」）。
 # 将来の枠連動ルーティング（quota-gate）は「どちらで起動するか」を自動で選ぶ層で、この workflow 自体は変更不要。
 #
-# 結果の出口は2つあり、どちらも同じ内容を指す（どちらで読むかは実行するエージェントのランタイム次第）:
-#   1. 結果ブランチ net-fetch-results の net-fetch/<request_id>/ スライス
-#      （publish-ephemeral が毎回 orphan 1コミットに書き換える＝履歴に堆積せず TTL で失効する）
-#   2. ジョブログに直接出した meta と応答本文（ログ本文を取得できる手段があれば1回で読める）
+# 応答本文の出口は結果ブランチ net-fetch-results の net-fetch/<request_id>/ スライス1本だけ
+# （publish-ephemeral が毎回 orphan 1コミットに書き換える＝履歴に堆積せず TTL で失効する）。
+# ジョブログには本文を出さない——ログは git ブランチではないので TTL が効かず、リポジトリ設定の
+# Artifact and log retention に従って残るため（public では world-readable のまま）。ログに出すのは
+# 照合用の meta と bytes/sha256 だけ。読了後は cleanup=true の dispatch でスライスを即削除する。
 # ci-logs へは publish しない。net-fetch の結果は「読んだら用済みの一次データ」で、恒久ログの ci-logs に
 # 混ぜると public リポジトリでは削除しても git 履歴に永久に残るため（→ docs/ci-logs.md）。
 #
@@ -25,13 +26,17 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: '取得先 URL（https のみ）'
+        description: '取得先 URL（https のみ）。cleanup=true のときは不要'
         type: string
-        required: true
+        required: false
       request_id:
         description: '相関 ID（[A-Za-z0-9._-]+）。結果は net-fetch-results の net-fetch/<request_id>/ に出る'
         type: string
         required: true
+      cleanup:
+        description: '"true" なら取得せず、request_id のスライスを即削除する（読了後の後片付け。→ docs/net-fetch.md 手順6）'
+        type: string
+        default: 'false'
       method:
         description: 'GET か HEAD'
         type: choice
@@ -45,10 +50,6 @@ on:
         description: '取得タイムアウト秒'
         type: string
         default: '30'
-      inline_max_bytes:
-        description: 'ジョブログに直接出す応答本文の上限バイト（超過分は結果ブランチのスライスにのみ入る）'
-        type: string
-        default: '262144'
   # 休眠中に最後の結果が残り続けないための掃除。取得のたびに TTL 失効も走るので、これは
   # 「しばらく net-fetch を使わなかった」ケースだけを拾う。
   #
@@ -77,9 +78,17 @@ env:
 
 jobs:
   fetch:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.cleanup != 'true'
     runs-on: ubuntu-latest
     steps:
+      # url は `cleanup` dispatch では不要なので required: false にしてある。取得側で空のまま
+      # 進むと net-fetch.sh の中で分かりにくく落ちるので、ここで先に弾く。
+      - name: Require url for a fetch dispatch
+        if: inputs.url == ''
+        run: |
+          echo "::error::url は取得 dispatch では必須です（後片付けだけしたいなら cleanup=true で dispatch してください）。"
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -132,26 +141,26 @@ jobs:
           commit-message: "net-fetch: ${{ steps.fetch.outputs.dest }} (${{ steps.fetch.outputs.status }})"
           token: ${{ github.token }}
 
-      # 同じ結果をジョブログにも出す。ログ本文を取得できる手段を持つランタイムは、結果ブランチを
-      # fetch せずここから1回で読み戻せる（どちらの出口も内容は同じ。→ docs/net-fetch.md の手順5）。
-      # 末尾ステップに置いてあるのは、ログ末尾から N 行だけ取る読み方でも本文に届くようにするため。
-      - name: Echo result to job log
+      # 取得のメタ情報だけをジョブログに出す。**応答本文は出さない**——ジョブログは git ブランチでは
+      # ないので結果ブランチの TTL が効かず、リポジトリ設定の Artifact and log retention に従って
+      # 数日〜数十日残る。public な集約モードではそれが world-readable のまま残るため、本文の出口は
+      # 結果ブランチ1本に絞ってある（読み方は docs/net-fetch.md の手順5。本文が要るならブランチを読む。
+      # dispatch できる権限があるランタイムはコンテンツ取得 API でも読めるので、これで読めなくなる
+      # ランタイムは無い）。ここに出すのは「取得が成功したか・何バイトか・中身が同一か」を
+      # 後から照合できる最小限（size と sha256）だけ。
+      - name: Echo result metadata to job log
         # 参照するのは composite action が宣言した出力名（`result-dir`）。net-fetch.sh が
         # GITHUB_OUTPUT に書く生のキー（`result_dir`）ではない——後者を書くと常に空になり、
         # この if が偽になってジョブログ出力が毎 run 黙ってスキップされる。
         if: always() && steps.fetch.outputs.result-dir != ''
         env:
           RESULT_DIR: ${{ steps.fetch.outputs.result-dir }}
-          INLINE_MAX_BYTES: ${{ inputs.inline_max_bytes }}
         run: |
           set -uo pipefail
-          cap="$INLINE_MAX_BYTES"
-          case "$cap" in ''|*[!0-9]*) cap=262144 ;; esac
-          [ "$cap" -gt 0 ] || cap=262144
 
-          # 取得した外部コンテンツをそのままログに流すと、本文中の `::error::` 等が workflow command
-          # として解釈される（ログ経由のコマンド注入）。stop-commands で解釈を止めてから出し、同じ
-          # トークンで再開する。トークンは本文側から推測できると止め損なうのでランダムにする。
+          # meta.txt は net-fetch.sh が組み立てた自前の要約だが、取得先が決めた文字列（最終 URL・
+          # content-type 等）を含みうる。`::error::` 等が workflow command として解釈されるのを
+          # 防ぐため stop-commands で囲む。トークンは推測されると止め損なうのでランダムにする。
           guard="nf-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
           echo "::stop-commands::${guard}"
 
@@ -160,14 +169,8 @@ jobs:
           echo "===== NET-FETCH META END ====="
 
           if [ -f "$RESULT_DIR/response.txt" ]; then
-            size="$(wc -c < "$RESULT_DIR/response.txt" | tr -d ' ')"
-            echo "===== NET-FETCH RESPONSE BEGIN (bytes=${size}) ====="
-            head -c "$cap" "$RESULT_DIR/response.txt"
-            echo
-            if [ "$size" -gt "$cap" ]; then
-              echo "[truncated at ${cap} bytes; the full body is only in the result branch slice]"
-            fi
-            echo "===== NET-FETCH RESPONSE END ====="
+            echo "response.txt: bytes=$(wc -c < "$RESULT_DIR/response.txt" | tr -d ' ') sha256=$(sha256sum "$RESULT_DIR/response.txt" | cut -d' ' -f1)"
+            echo "本文はジョブログに出さない。結果ブランチ '${RESULT_BRANCH}' のスライスを読むこと。"
           else
             echo "(no response body: status is not ok, or method was HEAD)"
           fi
@@ -175,6 +178,30 @@ jobs:
           echo "::${guard}::"
 
   # 休眠中の掃除専用。取得はせず、TTL を過ぎたスライスを落とすだけ。
+  # 読了後の後片付け。エージェントが結果を読み終えた直後に cleanup=true で dispatch する経路で、
+  # 公開時間を「TTL の3日」から「実際の読み取りにかかった数分」に縮める（→ docs/net-fetch.md 手順6）。
+  # 定期 sweep と違って**使ったときだけ**1 run なので、休眠中は1分も課金されない。
+  cleanup:
+    if: github.event_name == 'workflow_dispatch' && inputs.cleanup == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Drop the consumed result slice
+        uses: ./.github/actions/publish-ephemeral
+        with:
+          # prune-only＝自分のスライスは書かない。drop-slice で読了済みスライスを齢に関係なく落とす。
+          # request_id の正規化は publish-ephemeral 側が「素のスライス名か」で検証する（パス脱出防止）。
+          prune-only: 'true'
+          drop-slice: ${{ inputs.request_id }}
+          branch: ${{ env.RESULT_BRANCH }}
+          retention-days: ${{ env.RESULT_RETENTION_DAYS }}
+          commit-message: "net-fetch: drop consumed slice"
+          token: ${{ github.token }}
+
+  # 休眠中の掃除（バックストップ）。上の cleanup が主経路で、これはエージェントが読了後の dispatch を
+  # し損ねた（落ちた・忘れた）ときの取りこぼしを拾う。
   sweep:
     # public のみ。TTL 超過の世界公開を防ぐのが日次掃除の目的で、private では便益が無いのに
     # 枠だけ課金されるため（理由は上の schedule のコメント）。private では skip＝分数ゼロで、

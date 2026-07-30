@@ -357,10 +357,12 @@ marker を読めて期限切れと判定できたスライスに加え、marker 
 証明できないため fail-closed で削除する。scheduled sweep は最後のスライスが消えた場合も
 空 tree の orphan commit を publish し、揮発ブランチ上に期限切れデータを残さない。
 
-**失効が走る契機は「次の書き込み」と「日次 sweep」の2つで、sweep は public リポジトリでだけ動く**
-（`net-fetch.yml` の `sweep` ジョブが private を skip する）。日次 sweep の目的は「TTL を超えて
-世界公開する時間を最小化する」ことで、結果が非公開な private consumer では便益が無いのに Actions
-分数だけがアカウント枠に課金されるため。したがって実際の最大保持はモードで違う:
+**失効・削除が走る契機は3つ**: ①読了後の cleanup dispatch（主経路）②次の書き込み ③日次 sweep。
+③は **public リポジトリでだけ動く**（`net-fetch.yml` の `sweep` ジョブが private を skip する）——
+日次 sweep の目的は「TTL を超えて世界公開する時間を最小化する」ことで、結果が非公開な private
+consumer では便益が無いのに Actions 分数だけがアカウント枠に課金されるため。
+
+①を実行すれば公開時間は読み取り時間（数分）で終わる。①を**省いた**場合の最大保持はモードで違う:
 
 - **集約モード（public な ops-runner）**: TTL＋最大1日。上段の「期限切れデータを残さない」が成立する。
 - **分散モード（private consumer）**: 失効は次の取得時にしか走らないので、休眠中は最後のスライスが
@@ -377,10 +379,21 @@ orphan 再構築すると quota 信号や archive ログの経緯まで巻き込
 や blob ホストへ 302 し、**egress 制限下のエージェント実行環境はこれらを拒否する**（実測: CONNECT に 403・
 到達不可）。`gh run download` も REST も同じホストに当たるので、artifact 化すると全エージェントで結果を
 読み戻せなくなる。egress 制限下で確実に届くのは **git（`git fetch`）と `api.github.com`** だけ。
-そのため出口は「揮発ブランチ」と「ジョブログ」の2つにし、**揮発は artifact ではなく TTL とブランチ
-書き換えで実現している**。ジョブログ側は、ログ本文を取得できるランタイム（GitHub の MCP ツール等）が
-ブランチを取得せず1回で読めるようにするための併設で、**手順上はどちらも同格の「満たし方」**
-（ツールの有無で手順を分岐させない。→ `docs/sop-format.md`）。
+そのため出口は揮発ブランチにし、**揮発は artifact ではなく TTL とブランチ書き換えで実現している**。
+
+**応答本文はジョブログには出さない**。ジョブログは git ブランチではないので揮発ブランチの TTL が効かず、
+リポジトリ設定の Artifact and log retention（1〜90日）に従って残る——public な集約モードではそれが
+world-readable のまま残り、TTL で縮めた公開時間がログ側で無効になる。ログに出すのは照合用の最小限
+（`meta.txt`・本文の `bytes` と `sha256`）だけ。**これで読めなくなるランタイムは無い**: 結果ブランチは
+`git fetch` だけでなく**コンテンツ取得 API**でも読めるので、シェルや git を持たず GitHub の MCP ツール
+だけのランタイムでも満たせる（かつて本文をログに併載していたのは往復回数を減らす便宜で、
+能力の橋渡しではなかった）。
+
+**公開時間を縮める主経路は定期 sweep ではなく「読了後の cleanup dispatch」**。エージェントが結果を
+読み終えた直後に `cleanup: 'true'` で同じ workflow を起動し、`publish-ephemeral` の `drop-slice` で
+そのスライスを齢に関係なく落とす。これにより公開時間は TTL の3日ではなく実際の読み取り時間で終わり、
+かつ**使ったときだけ 1 run** なので休眠中の課金がゼロになる（定期 sweep は使わない月も毎日課金される）。
+日次 sweep は cleanup をし損ねたときのバックストップとして public にのみ残す。
 
 `publish-ephemeral` は `publish-ci-logs` を拡張せず別 action にしてある。挙動が大きく違ううえ
 （追記型 vs 毎回書き換え）、`publish-ci-logs` は consumer の deploy 系が依存する敏感な経路だから
