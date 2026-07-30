@@ -1,0 +1,1 @@
+../shared/docs/merged-branch-guard.md
