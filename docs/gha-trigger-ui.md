@@ -1,0 +1,1 @@
+../shared/docs/gha-trigger-ui.md

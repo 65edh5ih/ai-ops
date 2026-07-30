@@ -92,6 +92,7 @@ jobs:
           # cutoff が未来になって同じ「全件削除」に落ちる（例: 213503982334600）。
           AGE_DAYS_MAX=36500      # 100年。ブランチ掃除の入力としてこれを超える値は誤入力とみなす
           AGE_DAYS_MAX_DIGITS=5   # ${AGE_DAYS_MAX} の桁数
+          AGE_DAYS_MAX_RAW=32     # 先頭ゼロを含めた生入力の長さ上限（下記の理由で正規化より前に効かせる）
           age_raw="$AGE_DAYS"
           case "$age_raw" in
             ''|*[!0-9]*)
@@ -99,11 +100,21 @@ jobs:
               exit 1
               ;;
           esac
+          # **生入力の長さで先に弾く**（MUST）。下の正規化より前に置くこと: 数万個の先頭ゼロのような
+          # 「数値としては妥当だが異常に長い」入力を、正規化に一切触らせないため。桁数上限
+          # （AGE_DAYS_MAX_DIGITS）は先頭ゼロを落とした後の値に対する検査なので、ここは別に要る
+          # （`0...0365` は正規化後3桁で通るが、生では任意に長くできる）。
+          if [ "${#age_raw}" -gt "$AGE_DAYS_MAX_RAW" ]; then
+            echo "::error::age_days is too long (${#age_raw} chars, max ${AGE_DAYS_MAX_RAW}); refusing to delete branches"
+            exit 1
+          fi
           # 先頭ゼロを**文字列のまま**落とす（08 等を8進数と解釈させない）。
-          age_trimmed="$age_raw"
-          while [ "${#age_trimmed}" -gt 1 ] && [ "${age_trimmed#0}" != "$age_trimmed" ]; do
-            age_trimmed="${age_trimmed#0}"
-          done
+          # 1文字ずつ削る while ループにしない: 反復ごとに残りを丸ごとコピーするので先頭ゼロの数に対して
+          # 二次で伸びる。`${age_raw%%[!0]*}` が先頭ゼロの連なりを1回で取り出し、それを前置除去する。
+          # 全部ゼロのときは `%%` が一致せず入力全体を返すため age_trimmed が空になる（下で 0 に寄せ、
+          # 範囲検査が 1 未満として弾く）。
+          age_trimmed="${age_raw#"${age_raw%%[!0]*}"}"
+          [ -n "$age_trimmed" ] || age_trimmed=0
           # **桁数で先に弾く**（MUST）。算術展開は 64bit で回り込むため、上限判定を $(( )) の後に置くと
           # 巨大な入力が小さな正の値に化けて検査を通り抜ける（例: 18446744073709551617 → 1）。
           # 上限超えは算術に入れる前に文字列長で落とす。

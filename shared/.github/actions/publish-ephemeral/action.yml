@@ -3,20 +3,23 @@ description: >-
   Publish a local directory snapshot into a slice of a dedicated *ephemeral*
   branch. Unlike `publish-ci-logs` (append-only history for durable CI logs),
   this leaves no git history: the branch is rewritten as a single orphan commit
-  on every write, holding only the slices newer than `retention-days`. Use it
-  for read-once agent results (net-fetch) that must not accumulate — especially
-  in public repositories, where anything that enters history is world-readable
-  forever even after the file is deleted. Failures never fail the calling job
-  unless `fail-on-publish-error` is set; otherwise they surface as warnings.
+  on every write, holding only the slices newer than the TTL
+  (`retention-minutes`, else `retention-days`). Use it for read-once agent
+  results (net-fetch) that must not accumulate — especially in public
+  repositories, where anything that enters history is world-readable forever
+  even after the file is deleted. A failed publish surfaces as a workflow
+  warning without failing the job, unless the caller sets
+  `fail-on-publish-error` (do that wherever a green run would be read as proof
+  the branch changed).
 
   NOT a deletion mechanism. Rewriting the branch only makes the previous commit
   unreachable; the remote keeps unreachable objects, and on GitHub anyone who
   recorded a commit or blob SHA while the branch was live can still fetch that
   object afterwards. Nothing here (and no GitHub API) forces the remote to
-  garbage-collect, so a successful write bounds *accumulation and
-  discoverability*, never disclosure. Treat anything published to a public
-  repository through this action as disclosed permanently at publish time, and
-  keep data that must not be disclosed off the public path entirely.
+  garbage-collect, so a successful write — and any TTL, however short — bounds
+  *accumulation and discoverability*, never disclosure. Treat anything published
+  to a public repository through this action as disclosed permanently at publish
+  time, and keep data that must not be disclosed off the public path entirely.
 inputs:
   source-dir:
     description: >-
@@ -44,9 +47,19 @@ inputs:
       integer. Age comes from the `.published-at` marker this action writes into
       each slice; a slice whose marker is missing or unreadable is treated as
       expired (fail toward deletion, since the point of this branch is to not
-      retain).
+      retain). Ignored when `retention-minutes` is set.
     required: false
     default: "3"
+  retention-minutes:
+    description: >-
+      Same as `retention-days` but in minutes, for callers that need a TTL
+      shorter than a day. When set to a positive integer this WINS over
+      `retention-days`; empty (the default) keeps the day-based value, so
+      existing callers are unaffected. A public runner wants a tight TTL because
+      every extra minute is world-readable, while the day granularity is fine
+      where results are private.
+    required: false
+    default: ""
   drop-slice:
     description: >-
       Names of slices under `slice-root` to delete regardless of their age, in
@@ -93,6 +106,7 @@ runs:
         BRANCH: ${{ inputs.branch }}
         SLICE_ROOT: ${{ inputs.slice-root }}
         RETENTION_DAYS: ${{ inputs.retention-days }}
+        RETENTION_MINUTES: ${{ inputs.retention-minutes }}
         PRUNE_ONLY: ${{ inputs.prune-only }}
         DROP_SLICE: ${{ inputs.drop-slice }}
         FAIL_ON_PUBLISH_ERROR: ${{ inputs.fail-on-publish-error }}
@@ -118,6 +132,16 @@ runs:
           ''|*[!0-9]*) RETENTION_DAYS=3 ;;
         esac
         [ "$RETENTION_DAYS" -gt 0 ] || RETENTION_DAYS=3
+
+        # Resolve the TTL to seconds. retention-minutes wins when it is a positive integer;
+        # anything else (empty, or garbage) falls back to the day-based value so a typo cannot
+        # silently shorten the TTL to zero and wipe a slice the caller is still reading.
+        RETENTION_SECONDS="$(( RETENTION_DAYS * 86400 ))"
+        case "$RETENTION_MINUTES" in
+          ''|*[!0-9]*) : ;;
+          *) [ "$RETENTION_MINUTES" -gt 0 ] && RETENTION_SECONDS="$(( RETENTION_MINUTES * 60 ))" ;;
+        esac
+        echo "publish-ephemeral: retention=${RETENTION_SECONDS}s"
 
         # Reject a malformed drop-slice here, NOT inside attempt_publish: the retry loop below
         # treats every non-zero return as "branch moved or transient", so a validation error
@@ -184,7 +208,7 @@ runs:
           # ── expire old slices ────────────────────────────────────────────
           local now cutoff marker dir ts
           now="$(date -u +%s)"
-          cutoff="$(( now - RETENTION_DAYS * 86400 ))"
+          cutoff="$(( now - RETENTION_SECONDS ))"
           # A missing marker cannot establish a safe retention age. Fail toward deletion.
           if [ -d "${tmp}/${SLICE_ROOT}" ]; then
             while IFS= read -r -d '' dir; do

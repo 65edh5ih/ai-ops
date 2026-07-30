@@ -53,17 +53,18 @@ on:
   # 休眠中に最後の結果が残り続けないための掃除。取得のたびに TTL 失効も走るので、これは
   # 「しばらく net-fetch を使わなかった」ケースだけを拾う。
   #
-  # 日次にしてあるのは、掃除の間隔がそのまま TTL の超過分になるため。週1だと金曜に置かれた
-  # スライスが日曜の掃除では未達（2日）で次の日曜まで残り、3日 TTL のはずが実質9日公開され続ける
-  # （集約モードは public なので、これは「広告した保持期間より長く世界公開する」ことになる）。
-  # 日次なら最大でも TTL + 1日に収まる。コストは1 run 数十秒＝課金は最小単位の1分/日。
+  # 毎時にしてあるのは、掃除の間隔がそのまま TTL の超過分になるため。日次だと TTL 60分の
+  # スライスが最大25時間残り、「広告した保持期間より長く世界公開する」ことになる。毎時なら
+  # 上限は TTL + 1時間 ≒ 2時間に収まる。
   #
-  # ただしこの日次実行は public リポジトリでだけ走る（sweep ジョブの `if` を見よ）。上の理由は
+  # ただしこの定期実行は public リポジトリでだけ実処理をする（sweep ジョブの `if` を見よ）。上の理由は
   # 「TTL を超えて世界公開する時間を最小化する」ことなので、結果が非公開な private リポジトリでは
   # 便益が発生しない一方、Actions 分数だけはアカウント枠に課金される。private では掃除を
-  # 「次の取得」に寄せて枠を一切使わない。
+  # 「次の取得」に寄せて枠を一切使わない。**public は Actions 無料なので毎時でもコストは 0**。
+  # 副作用として private では毎時 skip の run が履歴に並ぶ（分数は 0。schedule は workflow 単位で
+  # しか設定できず、リポジトリの可視性で cron を分けられないため）。
   schedule:
-    - cron: '17 4 * * *'
+    - cron: '17 * * * *'
 
 permissions:
   contents: write        # publish-ephemeral が結果ブランチへ push するのに必要
@@ -74,7 +75,15 @@ concurrency:
 
 env:
   RESULT_BRANCH: net-fetch-results
-  RESULT_RETENTION_DAYS: '3'
+  # 保持期間は可視性で変える。public は1分ごとに世界公開が伸びるので短く（60分）、private は
+  # 露出しないので日単位のまま（3日）でよい。取得から読了までは通常数分なので 60 分は余裕を見た値。
+  # `github.event.repository.private` が取れない場合は falsy＝public 扱いになる（短い側＝安全側に倒れる）。
+  RESULT_RETENTION_MINUTES: ${{ github.event.repository.private && '4320' || '60' }}
+  # public で「取得の痕跡」を残さないための run 削除の閾値（下の sweep で使用）。ログ本文は既に
+  # 出していないが、run には meta（取得 URL・時刻）と dispatch 入力が残り、これは TTL の対象外で
+  # リポジトリの Artifact and log retention に従うため、sweep 側で消す。
+  # **成功 run だけ**を消す（失敗 run のログは障害調査に要るので retention 設定に委ねる）。
+  RUN_RETENTION_DAYS: '1'
 
 jobs:
   fetch:
@@ -140,7 +149,7 @@ jobs:
           # 結果はどこからも読めない。警告で緑にせず赤で終わらせて、エージェントに再実行させる。
           fail-on-publish-error: 'true'
           branch: ${{ env.RESULT_BRANCH }}
-          retention-days: ${{ env.RESULT_RETENTION_DAYS }}
+          retention-minutes: ${{ env.RESULT_RETENTION_MINUTES }}
           commit-message: "net-fetch: ${{ steps.fetch.outputs.dest }} (${{ steps.fetch.outputs.status }})"
           token: ${{ github.token }}
 
@@ -253,18 +262,21 @@ jobs:
           # 緑＝「消えた」として手順6が完了判定に使うので、push できなかったら赤で終わらせる。
           fail-on-publish-error: 'true'
           branch: ${{ env.RESULT_BRANCH }}
-          retention-days: ${{ env.RESULT_RETENTION_DAYS }}
+          retention-minutes: ${{ env.RESULT_RETENTION_MINUTES }}
           commit-message: "net-fetch: drop consumed slice"
           token: ${{ github.token }}
 
   # 休眠中の掃除（バックストップ）。上の cleanup が主経路で、これはエージェントが読了後の dispatch を
   # し損ねた（落ちた・忘れた）ときの取りこぼしを拾う。
   sweep:
-    # public のみ。TTL 超過の世界公開を防ぐのが日次掃除の目的で、private では便益が無いのに
+    # public のみ。TTL 超過の世界公開を防ぐのが定期掃除の目的で、private では便益が無いのに
     # 枠だけ課金されるため（理由は上の schedule のコメント）。private では skip＝分数ゼロで、
     # 掃除は次の取得時の publish-ephemeral（同じ失効ロジックを通る）に委ねる。
     if: github.event_name == 'schedule' && github.event.repository.private == false
     runs-on: ubuntu-latest
+    permissions:
+      contents: write      # 結果ブランチの書き換え
+      actions: write       # 古い成功 run の削除（下記）。fetch ジョブには与えない
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -274,6 +286,58 @@ jobs:
         with:
           prune-only: 'true'
           branch: ${{ env.RESULT_BRANCH }}
-          retention-days: ${{ env.RESULT_RETENTION_DAYS }}
-          commit-message: "net-fetch: expire result slices older than ${{ env.RESULT_RETENTION_DAYS }}d"
+          retention-minutes: ${{ env.RESULT_RETENTION_MINUTES }}
+          commit-message: "net-fetch: expire result slices older than ${{ env.RESULT_RETENTION_MINUTES }}m"
           token: ${{ github.token }}
+
+      # 取得の痕跡は結果ブランチ以外にも残る: run のジョブログ（meta＝取得 URL・時刻）と、
+      # GitHub が run メタデータとして記録する dispatch 入力（url / request_id）。これらは
+      # 結果ブランチの TTL の対象外で、リポジトリ設定の Artifact and log retention に従って残る。
+      # public では world-readable なので、TTL や cleanup で縮めた公開時間がここで無効になる。
+      #
+      # run_id を控えておく必要は無い——Actions API が run 一覧そのものを持っているので、
+      # ここで古い成功 run を列挙して削除すればよい（エージェントの協力も台帳も不要）。
+      # ログだけ削除（DELETE .../logs）ではなく **run ごと削除**する: 前者では run が残り、
+      # dispatch 入力の URL が見え続ける。
+      #
+      # **成功 run だけ**を消す。失敗 run のログは障害調査に要るので Artifact and log retention に委ねる。
+      - name: Delete old successful runs (public only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_RETENTION_DAYS: ${{ env.RUN_RETENTION_DAYS }}
+          SELF_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -uo pipefail
+
+          case "$RUN_RETENTION_DAYS" in
+            ''|*[!0-9]*) echo "::warning::RUN_RETENTION_DAYS が不正。run 削除をスキップします。"; exit 0 ;;
+          esac
+          [ "$RUN_RETENTION_DAYS" -gt 0 ] || { echo "::warning::RUN_RETENTION_DAYS が 0。スキップします。"; exit 0; }
+
+          cutoff="$(date -u -d "-${RUN_RETENTION_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)"
+          echo "cutoff=${cutoff} (これより古い completed かつ success の run を削除)"
+
+          # status=success は「completed かつ conclusion=success」を意味する（実行中は含まれない）。
+          # それでも念のため自分自身の run_id は除外する（削除対象に自分が混ざる事故の予防）。
+          ids="$(gh api --paginate \
+            "repos/${REPO}/actions/workflows/net-fetch.yml/runs?status=success&per_page=100" \
+            --jq ".workflow_runs[] | select(.created_at < \"${cutoff}\") | .id" 2>/dev/null || true)"
+
+          if [ -z "$ids" ]; then
+            echo "削除対象なし。"
+            exit 0
+          fi
+
+          deleted=0 failed=0
+          for id in $ids; do
+            [ "$id" = "$SELF_RUN_ID" ] && continue
+            if gh api -X DELETE "repos/${REPO}/actions/runs/${id}" >/dev/null 2>&1; then
+              deleted=$(( deleted + 1 ))
+            else
+              failed=$(( failed + 1 ))
+            fi
+          done
+          echo "run 削除: deleted=${deleted} failed=${failed}"
+          # 失敗しても掃除全体は落とさない（次の毎時実行で再試行される）。
+          [ "$failed" -eq 0 ] || echo "::warning::${failed} 件の run 削除に失敗しました（次回リトライ）。"
