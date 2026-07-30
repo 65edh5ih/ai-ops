@@ -9,8 +9,10 @@
 //     未対応 → 一覧に載る／対応して resolve → 次の run で消える。別途の管理表を持たないのでずれない。
 //   - **消える条件は「resolve された」だけ**。直近スキャンの窓から外れただけで消えないよう、前回の全体
 //     一覧に載っていた PR は名指しで再確認する（持ち越し）。前回の出力が持ち越しの入力を兼ねる。
-//   - **読めなかったものは落とさない**。取得に失敗したリポジトリ・PR は「取得失敗」行として残す
-//     （黙って短い一覧を出すと、指摘が消えたのか読めなかったのか区別できず fail-open になる）。
+//   - **読めなかったものは落とさない**。取得に失敗したリポジトリ・PR、および**レビュースレッドを
+//     1ページ（50件）で読み切れなかった PR** は「取得失敗」行として残す（黙って短い一覧を出すと、
+//     指摘が消えたのか読めなかったのか区別できず fail-open になる）。workflow はこの件数で run を
+//     失敗させるので、読み残しは緑にならない。
 //
 // 入力（環境変数）:
 //   CRI_TOKEN          GitHub トークン（対象リポジトリの Pull requests: read が要る）
@@ -186,7 +188,16 @@ function loadCarriedPrs(path) {
 function collectFromPr(repo, pr) {
   if (!pr) return 0;
   seenPrs.add(`${repo}#${pr.number}`);
-  if (pr.reviewThreads?.pageInfo?.hasNextPage) truncated.push(`${repo}#${pr.number}`);
+  // レビュースレッドが1ページ（50件）に収まらない PR は、2ページ目以降を**見ていない**。
+  // 注記だけ出して緑で流すと「指摘ゼロ」と「読み切れていない」が区別できず、この一覧が防ぐはずの
+  // fail-open そのものになる（workflow はこの failures の件数で run を失敗させる）。
+  if (pr.reviewThreads?.pageInfo?.hasNextPage) {
+    truncated.push(`${repo}#${pr.number}`);
+    failures.push({
+      repo: `${repo}#${pr.number}`,
+      reason: 'review threads exceed one page (50); later pages were not inspected',
+    });
+  }
   let found = 0;
   for (const th of pr.reviewThreads?.nodes || []) {
     if (!th || th.isResolved) continue;
