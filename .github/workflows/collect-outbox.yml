@@ -165,19 +165,32 @@ jobs:
           body-path: ${{ runner.temp }}/cleanup-body.md
 
       # cleanup をマージすると提案が outbox から消える＝オーナーが取り込み PR を close して却下する
-      # 逃げ道が無くなる。なので**取り込みが実際に入った後**にだけ掃除する。
-      # 却下だけの run（applied=0）は取り込み PR 自体が無く、オーナーの判断待ちも無いので掃除してよい
-      # ——ここを人間待ちにすると、壊れた提案1件が最古に居座って全 consumer の提案を止める。
+      # 逃げ道が無くなる。なので**取り込みが実際に入った後**にだけ掃除する。掃除してよいのは3通り:
+      #   1. 取り込み PR が実際にマージされた
+      #   2. 却下だけの run（applied=0）＝取り込み PR 自体が無く、オーナーの判断待ちも無い
+      #   3. **取り込み PR に差分が出なかった**（url が空）。提案は有効だが ops-sync 側は無変更、という
+      #      ケースが実在する（例: 対象タスクが既に存在しない task-done・現在の内容と同一の全文置換）。
+      #      close する対象も巻き戻る変更も無いので、掃除を止める理由が無い。
+      # 2 と 3 を人間待ちにすると、その提案が最古に居座って全 consumer の提案を永久に止める。
       - name: Merge consumer cleanup PR
+        id: merge-cleanup
         if: >-
           steps.cleanup-pr.outputs.pull-request-url != ''
-          && (steps.collect.outputs.applied == '0' || steps.merge-intake.outputs.merged == 'true')
+          && (steps.collect.outputs.applied == '0'
+              || steps.merge-intake.outputs.merged == 'true'
+              || steps.intake-pr.outputs.pull-request-url == '')
         env:
           GH_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
           PR_URL: ${{ steps.cleanup-pr.outputs.pull-request-url }}
         run: |
-          gh pr merge --squash "$PR_URL" \
-            || echo "::warning::cleanup PR の自動マージに失敗しました（PR は open のまま残します）: $PR_URL"
+          # 失敗を握りつぶすと「提案は outbox に残っているのに run は緑」になり、次回以降も同じ提案が
+          # 最古に居座り続ける。結果は output に残し、最後の判定ステップで run を失敗させる。
+          if gh pr merge --squash "$PR_URL"; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::cleanup PR の自動マージに失敗しました（PR は open のまま残します）: $PR_URL"
+          fi
 
       # ── 保守バッチ: 役目を終えたトゥームストーンの掃除 ─────────────────────────
       # 上の collect が ops-sync チェックアウトを取り込み PR 用に書き換えるため、
@@ -256,14 +269,25 @@ jobs:
           APPLIED: ${{ steps.collect.outputs.applied }}
           REJECTED: ${{ steps.collect.outputs.rejected }}
           HOLDS: ${{ steps.collect.outputs.hold_count }}
-          MERGED: ${{ steps.merge-intake.outputs.merged }}
           CONSUMER: ${{ steps.collect.outputs.consumer }}
+          INTAKE_URL: ${{ steps.intake-pr.outputs.pull-request-url }}
+          INTAKE_MERGED: ${{ steps.merge-intake.outputs.merged }}
+          CLEANUP_URL: ${{ steps.cleanup-pr.outputs.pull-request-url }}
+          CLEANUP_MERGED: ${{ steps.merge-cleanup.outputs.merged }}
         run: |
           set -u
           waiting=0
-          # 提案は取り込んだが自動マージしなかった（＝ベース不一致・判定不能・常時層の肥大化）
-          if [ -n "${APPLIED}" ] && [ "${APPLIED}" != "0" ] && [ "${MERGED}" != "true" ]; then
-            echo "::error::取り込み PR がレビュー待ちです（保留 ${HOLDS:-?} 件・提案元 ${CONSUMER}）。理由は PR 本文と提案元の ci-logs を参照。"
+          # 提案は取り込んだが自動マージしなかった（＝ベース不一致・判定不能・常時層の肥大化）。
+          # INTAKE_URL が空＝取り込み PR に差分が出なかったケースは、マージすべきものが無いので対象外。
+          if [ -n "${APPLIED}" ] && [ "${APPLIED}" != "0" ] \
+             && [ -n "${INTAKE_URL}" ] && [ "${INTAKE_MERGED}" != "true" ]; then
+            echo "::error::取り込み PR がレビュー待ちです（保留 ${HOLDS:-?} 件・提案元 ${CONSUMER}）: ${INTAKE_URL}"
+            waiting=1
+          fi
+          # cleanup のマージを試みて失敗した（"false" は試行して失敗したときだけ入る）。握りつぶすと
+          # 提案が outbox に残ったまま run が緑になり、同じ提案が最古に居座って全 consumer を止める。
+          if [ "${CLEANUP_MERGED}" = "false" ]; then
+            echo "::error::outbox 掃除 PR を自動マージできませんでした。提案が ${CONSUMER} の outbox に残り、後続の提案が止まります: ${CLEANUP_URL}"
             waiting=1
           fi
           # 不正な提案を差し戻した（提案元のエージェントが書き直す必要がある）
