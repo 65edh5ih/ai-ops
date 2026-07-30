@@ -191,13 +191,50 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # 取得 run は、request_id が構造検査か secret 判定に引っかかると結果を request_id ではなく
+      # net-fetch/_invalid-<digest> へ退避する（net-fetch.sh）。cleanup は取得とは別 run なので
+      # 「どちらへ publish されたか」を知らない。digest は**生 ID から決まる**ので同じものを
+      # ここで組み立て直し、**両方**を落とす（片方しか渡さないと、退避されたスライスが残ったまま
+      # 「nothing to drop」で緑になり、緑＝消えたという手順6の完了条件が嘘になる）。
+      - name: Resolve the slices this request may have produced
+        id: slices
+        env:
+          REQUEST_ID: ${{ inputs.request_id }}
+        run: |
+          set -uo pipefail
+
+          # 退避先の digest は生の入力バイト列に対して取る（net-fetch.sh と同じ計算）。
+          digest="$(printf '%s' "$REQUEST_ID" | sha256sum | cut -c1-12)"
+
+          # 生 ID をスライス名として渡すのは、それが素のスライス名として妥当なときだけ。
+          # 構造的に不正な ID（`/` や改行を含む等）は取得側もスライス名に使っていないので、
+          # 渡すと publish-ephemeral の検証で run 全体が落ち、退避スライスを消せなくなる。
+          # 改行入りの ID をそのまま渡さないことは安全上も要る——drop-slice は1行1名なので、
+          # 複数行の ID は「複数のスライス名」に化けて無関係なスライスを消しうる。
+          names=""
+          case "$REQUEST_ID" in
+            ''|*[!A-Za-z0-9._-]*|*..*|.)
+              echo "request_id is not a bare slice name; dropping only the _invalid-<digest> fallback."
+              ;;
+            *) names="$REQUEST_ID" ;;
+          esac
+
+          # 以下に流す2行はどちらもサニタイズ済み（検証を通った素の名前／16進 digest）なので、
+          # 固定デリミタで multiline output に載せても入力側から区切りを偽装できない。
+          {
+            echo 'names<<__NET_FETCH_SLICES__'
+            [ -n "$names" ] && printf '%s\n' "$names"
+            printf '_invalid-%s\n' "$digest"
+            echo '__NET_FETCH_SLICES__'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Drop the consumed result slice
         uses: ./.github/actions/publish-ephemeral
         with:
           # prune-only＝自分のスライスは書かない。drop-slice で読了済みスライスを齢に関係なく落とす。
-          # request_id の正規化は publish-ephemeral 側が「素のスライス名か」で検証する（パス脱出防止）。
+          # 1行1スライス名。各行が素のスライス名かは publish-ephemeral 側が検証する（パス脱出防止）。
           prune-only: 'true'
-          drop-slice: ${{ inputs.request_id }}
+          drop-slice: ${{ steps.slices.outputs.names }}
           # 緑＝「消えた」として手順6が完了判定に使うので、push できなかったら赤で終わらせる。
           fail-on-publish-error: 'true'
           branch: ${{ env.RESULT_BRANCH }}

@@ -121,7 +121,12 @@ valid_request_id() {
 if valid_request_id "$REQUEST_ID"; then
   id_safe="$REQUEST_ID"
 else
-  id_safe="_invalid-$(date -u +%Y%m%d-%H%M%S)-$$"
+  # 退避先は**生 ID から決まる**（時刻や $$ を混ぜない）。読了後の cleanup dispatch は取得 run とは
+  # 別 run なので、時刻・PID を混ぜた名前は誰も再現できず、エージェントが持っている生 ID からは
+  # 到達できない——cleanup に生 ID を渡すと「そんなスライスは無い」で緑になり、退避スライスは
+  # 残ったまま「消えた」と誤って報告される（net-fetch.yml の cleanup ジョブが同じ digest を
+  # 組み立てて両方を落とす）。digest なので ID 自体（secret 形を含む）は名前に現れない。
+  id_safe="_invalid-$(printf '%s' "$REQUEST_ID" | sha256sum | cut -c1-12)"
 fi
 DEST="net-fetch/$id_safe"
 
