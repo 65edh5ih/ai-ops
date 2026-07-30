@@ -146,15 +146,19 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
      などをして `request_id` を変えて再実行する。
    - **結果ブランチを読めないときは、停止してユーザーに依頼する**（MUST）。読めないことを理由に、
      取得できたはずの内容を推測で埋めない（MUST NOT）。
-6. **読了後に cleanup を dispatch する**（MUST）。手順4と同じ workflow を、`request_id`（読んだものと同じ）と
+6. **読了後に cleanup を dispatch する**。手順4と同じ workflow を、`request_id`（読んだものと同じ）と
    **`cleanup: 'true'`** を渡して起動する（`url` は不要）。読了済みスライスが齢に関係なく即削除され、
-   公開時間が TTL の3日ではなく実際の読み取り時間で終わる。
-   - **集約モード（public な ops-runner）では特に省略しない**（MUST NOT）。省略すると取得内容が
-     世界公開のまま最大 TTL＋1日残る。public の Actions は無料なので、この 1 run に枠の心配は要らない。
-   - 分散モード（private）でも同じ手順でよい。省略した場合の残留は「次の取得まで」で、非公開なので
-     露出はしないが、枠を1分使ってでも消したいかはその場の判断でよい。
+   公開時間が TTL の3日ではなく実際の読み取り時間で終わる。**要求の強さはモードで違う**:
+   - **集約モード（public な ops-runner）では必ず実行する**（MUST）。省略すると取得内容が世界公開のまま
+     最大 TTL＋1日残る。public の Actions は無料なので、この 1 run に枠の心配は要らない
+     （「あとで sweep が消すから」は理由にならない——sweep は取りこぼし用で最大1日遅れる）。
+   - **分散モード（private）では任意**（MAY）。省略した場合の残留は「次の取得まで」だが非公開なので
+     露出しない。一方 private の Actions 分数はアカウント枠に課金されるので、**枠が逼迫しているなら
+     省略してよい**（→ `docs/actions-quota.md`）。機微な取得を早く消したいときは実行する。
    - 取得が `rejected`／`error` で終わった場合も、スライスが作られていれば同じように消せる。
-   - 完了条件: run が completed になる（対象スライスが既に無ければ「nothing to drop」で緑）。
+   - 完了条件: run が **success** で終わる。対象スライスが既に無い場合も「nothing to drop」で success。
+     **push に失敗した場合はこの run が赤くなる**ので、緑を「消えた」の証拠として使ってよい
+     （`fail-on-publish-error: 'true'`）。赤で終わったら消えていないので、再 dispatch する。
 
 ## 縛り（この仕組みが構造的に保証すること）
 
@@ -197,7 +201,12 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
   `gh run download` も REST も同じホストに当たるため、全エージェントで読み戻せなくなる。
   **egress 制限下で確実に届くのは git（`git fetch`）と `api.github.com` だけ**——だから本文の出口は
   結果ブランチで、揮発は artifact ではなく cleanup dispatch・TTL・ブランチ書き換えで実現している。
-- **読了後の cleanup を省く**: 手順6を飛ばすと、読み終えて用済みになった本文が TTL いっぱい
-  （集約モードなら世界公開のまま最大4日）残る（MUST NOT: 集約モードで省略する）。cleanup は 1 run で、
-  public では無料。「あとで sweep が消すから」は理由にならない——sweep は取りこぼし用の
-  バックストップで、public でしか動かず、しかも最大1日遅れる。
+- **集約モードで読了後の cleanup を省く**: 手順6を飛ばすと、読み終えて用済みになった本文が
+  世界公開のまま最大4日（TTL＋sweep の遅れ）残る（MUST NOT）。cleanup は 1 run で public では無料。
+  「あとで sweep が消すから」は理由にならない——sweep は取りこぼし用のバックストップで最大1日遅れる。
+  分散モード（private）では任意なので、これは集約モード限定の失敗。
+- **`request_id` に secret を貼る**: `ghp_...` のような token 形の値は文字種検査
+  （`[A-Za-z0-9._-]+`）を素通りするので、`net-fetch.sh` が secret 判定で別に弾いている
+  （publish 先パス・`meta.txt`・ジョブログに残さないため）。ただし **`workflow_dispatch` の入力値は
+  GitHub が run のメタデータとして記録する**ので、public な集約モードでは弾かれても入力欄から読める。
+  secret を `request_id` に入れないこと（MUST NOT）。相関 ID は使い捨ての無意味な文字列でよい。

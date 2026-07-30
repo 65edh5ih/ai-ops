@@ -136,6 +136,9 @@ jobs:
           source-dir: net-fetch-out
           # 生入力ではなく、スクリプトが検証・サニタイズした dest を使う（path traversal 防止）。
           dest: ${{ steps.fetch.outputs.dest }}
+          # 本文の出口はこのブランチだけ（ジョブログには出さない）なので、publish に失敗したら
+          # 結果はどこからも読めない。警告で緑にせず赤で終わらせて、エージェントに再実行させる。
+          fail-on-publish-error: 'true'
           branch: ${{ env.RESULT_BRANCH }}
           retention-days: ${{ env.RESULT_RETENTION_DAYS }}
           commit-message: "net-fetch: ${{ steps.fetch.outputs.dest }} (${{ steps.fetch.outputs.status }})"
@@ -195,6 +198,8 @@ jobs:
           # request_id の正規化は publish-ephemeral 側が「素のスライス名か」で検証する（パス脱出防止）。
           prune-only: 'true'
           drop-slice: ${{ inputs.request_id }}
+          # 緑＝「消えた」として手順6が完了判定に使うので、push できなかったら赤で終わらせる。
+          fail-on-publish-error: 'true'
           branch: ${{ env.RESULT_BRANCH }}
           retention-days: ${{ env.RESULT_RETENTION_DAYS }}
           commit-message: "net-fetch: drop consumed slice"

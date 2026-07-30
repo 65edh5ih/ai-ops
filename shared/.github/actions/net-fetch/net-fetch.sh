@@ -98,8 +98,13 @@ SAFE_REQUEST_ID="${SAFE_REQUEST_ID//$'\n'/[REDACTED-LF]}"
 structurally_valid_request_id() {
   # grep の ^/$ は改行ごとに一致するため、複数行の一部だけが正しくても通し得る。
   # shell の pattern で値全体を検査し、改行を含む入力を確実に拒否する。
+  #
+  # `.` は単独で明示的に弾く: '.' は許可文字なので文字種検査を素通りし、*..* にも一致しない。
+  # しかし dest が `net-fetch/.` になると publish 側の `cp -a src/. <root>/./` で結果ファイルが
+  # スライスではなく SLICE_ROOT 直下に散る。失効ループは `-type d` の直下ディレクトリだけを走査する
+  # ため、散ったファイルは**どの TTL でも消えない**（public なら恒久的に世界公開のまま残る）。
   case "$1" in
-    ''|*[!A-Za-z0-9._-]*|*..*) return 1 ;;
+    ''|*[!A-Za-z0-9._-]*|*..*|.) return 1 ;;
   esac
 }
 
