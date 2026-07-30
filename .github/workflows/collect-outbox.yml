@@ -77,11 +77,13 @@ jobs:
         env:
           PR_BODY_PATH: ${{ runner.temp }}/pr-body.md
           CLEANUP_BODY_PATH: ${{ runner.temp }}/cleanup-body.md
-        # pipefail: スクリプトの失敗を tee が飲み込まないようにする（docs/ci-logs.md 手順A-2）
+        # 出力（提案名・却下理由）を **tee でジョブログに出さない**（MUST。docs/ci-logs.md 手順A-6）。
+        # public リポジトリの run ログは world-readable なので、ci-logs の置き場だけ分けても
+        # ジョブログ側から同じものが読めてしまう。詳細は提案元 consumer の ci-logs で読む。
         run: |
           set -uo pipefail
-          node ops-sync/scripts/collect-outbox.mjs ops-sync/AGENTS_COMMON.md consumers ops-sync 2>&1 \
-            | tee /tmp/ci-logs/collect-outbox.log
+          node ops-sync/scripts/collect-outbox.mjs ops-sync/AGENTS_COMMON.md consumers ops-sync \
+            > /tmp/ci-logs/collect-outbox.log 2>&1
 
       - name: Record collect result
         if: always()
@@ -95,9 +97,11 @@ jobs:
             echo "- Applied/Rejected/Deferred: ${{ steps.collect.outputs.applied }}/${{ steps.collect.outputs.rejected }}/${{ steps.collect.outputs.deferred }}"
             echo "- Finished: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           } >> /tmp/ci-logs/summary.md
-          # 公開ロールアップ＝件数・種別・repo 名まで（提案のファイル名・却下理由は出さない）
+          # 公開ロールアップ＝件数・種別・repo 名まで（提案のファイル名・却下理由は出さない）。
+          # Result は**まず outcome で見る**: collect が落ちると outputs は空のままなので、
+          # 出力の空だけで判定すると「提案ゼロ」と失敗が同じ表示になる（恒久ログに成功と読める嘘が残る）。
           {
-            echo "- Result: ${{ steps.collect.outputs.consumer != '' && 'processed' || 'no proposals' }}"
+            echo "- Result: ${{ steps.collect.outcome != 'success' && 'collect FAILED' || (steps.collect.outputs.consumer != '' && 'processed' || 'no proposals') }}"
             echo "- Found: ${{ steps.collect.outputs.found }}"
             echo "- Type: ${{ steps.collect.outputs.type }}"
             echo "- Consumer: ${{ steps.collect.outputs.consumer }}"
@@ -105,6 +109,14 @@ jobs:
             echo "- Detail log (when a consumer was processed): \`collect-outbox/latest\` on that consumer's \`ci-logs\` branch"
             echo "- Finished: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           } >> /tmp/ci-logs-public/summary.md
+
+      # collect が **consumer を決める前に**落ちた場合だけ、失敗ログを公開側へ回す。その時点までの出力には
+      # 提案のファイル名・本文は出ていない（スクリプトは consumer を確定した時点でそれを output に出し、
+      # 提案ごとのログはその後で出し始める）ので公開して安全。これが無いと、ジョブログにも出していない
+      # 以上、失敗の詳細がどこにも残らない。consumer が決まっていれば詳細ログはその consumer 側に出る。
+      - name: Stage failure log for the public roll-up
+        if: always() && steps.collect.outcome != 'success' && steps.collect.outputs.consumer == ''
+        run: cp /tmp/ci-logs/collect-outbox.log /tmp/ci-logs-public/collect-failure.log || true
 
       - name: Open intake PR to ops-sync
         if: steps.collect.outputs.found == 'true'

@@ -127,6 +127,9 @@ const overRetention = dates.length > KEEP_WORKDAYS;
 // inbox 取り込みも保持量超過も無ければ何もしない（空 PR を作らない）。
 if (consumedFiles.length === 0 && !overRetention) {
   console.log(`within retention (${dates.length} workday(s)), no inbox fragments; nothing to do`);
+  // kept は「操作の件数」ではなく**処理後に本体へ残っているエントリ数**なので、何もしない場合も
+  // 実数を入れる（0 のままだと公開ロールアップが「本体が空」と読める）。何も動かさない＝全部残る。
+  counts.kept = undated.length + dated.length;
   emitCounts();
   process.exit(0);
 }

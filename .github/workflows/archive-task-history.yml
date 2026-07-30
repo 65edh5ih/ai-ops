@@ -68,10 +68,12 @@ jobs:
 
       - name: Consolidate inbox and archive overflow
         id: archive
-        # pipefail: スクリプトの失敗を tee が飲み込まないようにする（docs/ci-logs.md 手順A-2）
+        # 出力（フラグメント名を含む）を **tee でジョブログに出さない**（MUST。docs/ci-logs.md 手順A-6）。
+        # public リポジトリの run ログは world-readable で保持もリポジトリ設定任せなので、ci-logs の
+        # 置き場だけ分けてもジョブログ側から同じものが読めてしまう。詳細は対象リポジトリの ci-logs で読む。
         run: |
           set -uo pipefail
-          node scripts/archive-task-history.mjs target 2>&1 | tee /tmp/ci-logs/archive.log
+          node scripts/archive-task-history.mjs target > /tmp/ci-logs/archive.log 2>&1
 
       - name: Create or update archive PR
         id: create-pr
