@@ -72,11 +72,38 @@ jobs:
             git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${repo}.git" "consumers/${repo}"
           done < <(grep -vE '^[[:space:]]*(#|$)' ops-sync/consumers.txt)
 
+      # 自動マージの前提は「提案は提案元セッションでユーザーが見ている」だが、ops-sync 側から
+      # それは検証できない。代わりに提案元 main への書き込み権を使う——private なら main に載った
+      # 時点でオーナーのアクセス下にある。public にはその前提が無いので人間のレビューに回す。
+      # **判定できなかった repo は public 側に入れる**（引けなかった run で関門が黙って消えないように）。
+      - name: Determine which consumers are public
+        id: visibility
+        env:
+          GH_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
+        run: |
+          set -uo pipefail
+          pub=""
+          while read -r repo; do
+            v="$(gh repo view "$repo" --json visibility -q .visibility 2>/dev/null || true)"
+            case "$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')" in
+              private|internal) ;;
+              public)  pub="$pub $repo" ;;
+              *)       pub="$pub $repo"; echo "::warning::${repo} の可視性を判定できませんでした。安全側で public 扱いにします。" ;;
+            esac
+          done < <(grep -vE '^[[:space:]]*(#|$)' ops-sync/consumers.txt)
+          echo "public=${pub# }" >> "$GITHUB_OUTPUT"
+          # 「public が1つも無い」と「このステップが動かなかった」を collect 側で区別するための印。
+          # これが true でなければ collect は全 consumer を public 扱いにする（fail closed）。
+          echo "checked=true" >> "$GITHUB_OUTPUT"
+          echo "public consumers: ${pub:-（なし）}"
+
       - id: collect
         name: Apply proposals (one consumer per run)
         env:
           PR_BODY_PATH: ${{ runner.temp }}/pr-body.md
           CLEANUP_BODY_PATH: ${{ runner.temp }}/cleanup-body.md
+          PUBLIC_CONSUMERS: ${{ steps.visibility.outputs.public }}
+          VISIBILITY_CHECKED: ${{ steps.visibility.outputs.checked }}
         # 出力（提案名・却下理由）を **tee でジョブログに出さない**（MUST。docs/ci-logs.md 手順A-6）。
         # public リポジトリの run ログは world-readable なので、ci-logs の置き場だけ分けても
         # ジョブログ側から同じものが読めてしまう。詳細は提案元 consumer の ci-logs で読む。
