@@ -374,7 +374,8 @@ CI が生む出力には性質の違う2種類があり、**同じブランチ�
 
 - **恒久ログ**（CI ログ・quota 信号）→ `ci-logs` ブランチ／`publish-ci-logs`。追記型で、現在値を読ませ続ける。
 - **読んだら用済みの一次データ**（net-fetch の取得結果）→ 専用の揮発ブランチ（`net-fetch-results`）／
-  `publish-ephemeral`。毎回 orphan 1コミットへ書き換えるので**履歴に堆積せず**、TTL（既定3日）で失効する。
+  `publish-ephemeral`。毎回 orphan 1コミットへ書き換えるので**履歴に堆積せず**、TTL で失効する
+  （TTL は可視性で変える: public 60分・private 3日。理由は下記）。
 
 `publish-ephemeral` の retention は、`slice-root`（既定 `net-fetch`）直下をスライス境界として扱う。
 action が直接管理する各スライスには `.published-at` を書き、`slice-root` 直下のディレクトリだけを走査する。
@@ -382,14 +383,16 @@ marker を読めて期限切れと判定できたスライスに加え、marker 
 証明できないため fail-closed で削除する。scheduled sweep は最後のスライスが消えた場合も
 空 tree の orphan commit を publish し、揮発ブランチ上に期限切れデータを残さない。
 
-**失効・削除が走る契機は3つ**: ①読了後の cleanup dispatch（主経路）②次の書き込み ③日次 sweep。
+**失効・削除が走る契機は3つ**: ①読了後の cleanup dispatch ②次の書き込み ③毎時 sweep。
 ③は **public リポジトリでだけ動く**（`net-fetch.yml` の `sweep` ジョブが private を skip する）——
-日次 sweep の目的は「TTL を超えて世界公開する時間を最小化する」ことで、結果が非公開な private
+定期 sweep の目的は「TTL を超えて世界公開する時間を最小化する」ことで、結果が非公開な private
 consumer では便益が無いのに Actions 分数だけがアカウント枠に課金されるため。
 
 ①を実行すれば公開時間は読み取り時間（数分）で終わる。①を**省いた**場合の最大保持はモードで違う:
 
-- **集約モード（public な ops-runner）**: TTL＋最大1日。上段の「期限切れデータを残さない」が成立する。
+- **集約モード（public な ops-runner）**: TTL 60分＋sweep の最大1時間 ＝ 約2時間。上段の
+  「期限切れデータを残さない」が成立する。**この上限はエージェントに依存しない**（①は最適化で、
+  上限を担保しているのは③）。
 - **分散モード（private consumer）**: 失効は次の取得時にしか走らないので、休眠中は最後のスライスが
   **次に net-fetch を使うまで**残る（上限なし）。非公開なので世界公開にはならないが、
   「3日で消える」保証は private には無い。
@@ -418,7 +421,16 @@ world-readable のまま残り、TTL で縮めた公開時間がログ側で無�
 読み終えた直後に `cleanup: 'true'` で同じ workflow を起動し、`publish-ephemeral` の `drop-slice` で
 そのスライスを齢に関係なく落とす。これにより公開時間は TTL の3日ではなく実際の読み取り時間で終わり、
 かつ**使ったときだけ 1 run** なので休眠中の課金がゼロになる（定期 sweep は使わない月も毎日課金される）。
-日次 sweep は cleanup をし損ねたときのバックストップとして public にのみ残す。
+毎時 sweep は cleanup をし損ねたときのバックストップとして public にのみ残す（public の Actions は
+無料なので毎時でもコスト 0。private では skip＝分数ゼロ）。
+
+**痕跡は結果ブランチだけではない**。本文をジョブログから外しても、run には `meta`（取得 URL・時刻）と
+GitHub が記録する dispatch 入力（`url`/`request_id`）が残り、これらは結果ブランチの TTL の対象外で
+Artifact and log retention に従う。そこで **public では毎時 sweep が「1日より古い成功 run」を run ごと
+削除する**（`RUN_RETENTION_DAYS`）。ログだけ削除する API では run が残って dispatch 入力の URL が
+見え続けるため、run ごと消す。失敗 run は障害調査に要るので残す。**run_id を控える必要はない**——
+Actions API が run 一覧を持つので、台帳もエージェントの協力も要らない。帰結として public では
+1日より後に「いつ何を取得したか」を遡れない（net-fetch は `ci-logs` に publish しないため）。
 
 `publish-ephemeral` は `publish-ci-logs` を拡張せず別 action にしてある。挙動が大きく違ううえ
 （追記型 vs 毎回書き換え）、`publish-ci-logs` は consumer の deploy 系が依存する敏感な経路だから
