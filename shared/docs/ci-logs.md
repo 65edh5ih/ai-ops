@@ -23,6 +23,10 @@ slice 単位で publish する。このための composite action `.github/actio
   - **inline publish**（手順A-3）… 各ワークフローが**毎 run 常時**、自前の要約ログを公開する。
   - **フル生ログ collector**（手順A-4）… `workflow_run` で完了 run の生ログ全体を集約する別ワークフロー。
     **失敗時のみ**回収する。
+- **history の保持は 7日**（`publish-ci-logs` の `retention-days` 既定。`history-dir` を使うスライスだけ）。
+  `latest` は常に最新で上書きされ、期限の対象外。短く保つのは、CI ログを読むのは**直前に起きたこと**を
+  調べるときで、public リポジトリでは残した1エントリがそのまま世界公開の恒久記録になるため。
+  もっと長く要るスライスは呼び出し側で `retention-days` を上書きする（MAY）。
 - **collector・ログ設計ドキュメントのファイル名や有無はリポジトリ固有**（各 `AGENTS.md` の固有パートに書く）。
 - **エージェントに要る能力**: 対象リポジトリの `ci-logs` ブランチを読めること、および手順B では
   **run のページ（または run/check の annotation）を読めること**——ジョブ一覧と usage だけでは足りない

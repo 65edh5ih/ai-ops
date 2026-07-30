@@ -21,9 +21,11 @@ inputs:
   retention-days:
     description: >-
       Days to retain entries under history-dir before pruning. Only used when
-      history-dir is set. Must be a positive integer.
+      history-dir is set. Must be a positive integer. Kept short on purpose:
+      CI logs are read to diagnose something that just happened, and on a public
+      repository every retained entry is a world-readable permanent record.
     required: false
-    default: "30"
+    default: "7"
   run-id:
     description: >-
       Identifier appended to the history directory name (e.g. github.run_id).
@@ -93,7 +95,7 @@ runs:
         prune_history() {
           [ -n "${HISTORY_DIR}" ] || return 0
           local retention cutoff dir base dir_date
-          retention="${RETENTION_DAYS:-30}"
+          retention="${RETENTION_DAYS:-7}"
           if [ "$retention" -gt 0 ] && [ -d "${tmp}/${HISTORY_DIR}" ]; then
             cutoff="$(date -u -d "${retention} days ago" +'%Y%m%d')"
             while IFS= read -r -d '' dir; do

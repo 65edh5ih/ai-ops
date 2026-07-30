@@ -192,7 +192,7 @@ jobs:
           source-dir: /tmp/ci-logs
           dest: collect-outbox/latest
           history-dir: collect-outbox/history
-          retention-days: "30"
+          retention-days: "7"
           run-id: ${{ github.run_id }}
           commit-message: "ci-logs: collect-outbox (run ${{ github.run_id }})"
           token: ${{ secrets.OPS_SYNC_TOKEN }}
@@ -204,7 +204,7 @@ jobs:
           source-dir: /tmp/ci-logs-public
           dest: collect-outbox/latest
           history-dir: collect-outbox/history
-          retention-days: "30"
+          retention-days: "7"
           run-id: ${{ github.run_id }}
           commit-message: "ci-logs: collect-outbox (run ${{ github.run_id }})"
           token: ${{ secrets.OPS_SYNC_TOKEN }}

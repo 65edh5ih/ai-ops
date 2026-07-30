@@ -126,7 +126,7 @@ jobs:
           source-dir: /tmp/ci-logs
           dest: archive-task-history/latest
           history-dir: archive-task-history/history
-          retention-days: "30"
+          retention-days: "7"
           run-id: ${{ github.run_id }}
           commit-message: "ci-logs: archive-task-history (run ${{ github.run_id }})"
           token: ${{ secrets.OPS_SYNC_TOKEN }}
@@ -157,10 +157,9 @@ jobs:
         with:
           source-dir: /tmp/ci-logs-public
           dest: archive-task-history/${{ matrix.repo }}/latest
-          # history は残す。件数だけなので安全なうえ、齢による prune が効くので
-          # **旧方式で積まれた（ファイル名を含む）履歴エントリが保持期間で枝先から落ちる**。
+          # history は残す（件数だけなので安全で、日次バッチが回っているかの推移が見える）。
           history-dir: archive-task-history/${{ matrix.repo }}/history
-          retention-days: "30"
+          retention-days: "7"
           run-id: ${{ github.run_id }}
           commit-message: "ci-logs: archive-task-history ${{ matrix.repo }} (run ${{ github.run_id }})"
           token: ${{ secrets.OPS_SYNC_TOKEN }}
