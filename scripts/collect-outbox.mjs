@@ -129,6 +129,12 @@ const consumerDir = path.join(consumersRoot, consumerRepo);
 // 新パスへ差し戻すと、提案者が自分の置いた場所を見ても見つけられない）。
 const rejectedDir = path.join(consumerDir, batch[0].outboxDir, 'outbox', 'rejected');
 
+// 処理対象の consumer が決まった時点で先に出しておく。以降このスクリプトの出力には提案のファイル名・
+// 却下理由（＝提案元 consumer の中身）が混ざるので、**途中で落ちても**ワークフローが詳細ログの
+// 送り先を知っていなければならない（→ shared/docs/ci-logs.md 手順A-6）。最後の emitOutputs では
+// このキーを再送しない。
+emitOutputs({ consumer: consumerRepo, consumer_dir: consumerDir });
+
 const KNOWN = ['common-block-edit', 'shared-file', 'task', 'task-done'];
 const applied = [];   // { name, type, title, section }
 const rejected = [];  // { name, reason }
@@ -398,8 +404,7 @@ emitOutputs({
   found: applied.length ? 'true' : 'false',
   consumer_changed: applied.length + rejected.length ? 'true' : 'false',
   type: applied.length === 1 ? applied[0].type : 'batch',
-  consumer: consumerRepo,
-  consumer_dir: consumerDir,
+  // consumer / consumer_dir は上（consumer 確定時）で出済み——同じキーを2度書かない
   proposal: batch.map((p) => p.name).join(', '),
   applied: String(applied.length),
   rejected: String(rejected.length),

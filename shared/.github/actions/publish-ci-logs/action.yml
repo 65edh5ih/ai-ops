@@ -21,9 +21,11 @@ inputs:
   retention-days:
     description: >-
       Days to retain entries under history-dir before pruning. Only used when
-      history-dir is set. Must be a positive integer.
+      history-dir is set. Must be a positive integer. Kept short on purpose:
+      CI logs are read to diagnose something that just happened, and on a public
+      repository every retained entry is a world-readable permanent record.
     required: false
-    default: "30"
+    default: "7"
   run-id:
     description: >-
       Identifier appended to the history directory name (e.g. github.run_id).
@@ -33,8 +35,20 @@ inputs:
   commit-message:
     description: Commit message for the ci-logs update.
     required: true
+  repository:
+    description: >-
+      Target repository (`owner/repo`) whose `ci-logs` branch receives the
+      slice. Defaults to the repository running the workflow. Set this when the
+      log is *about* another repository (a cross-repo batch), so that log
+      visibility follows the subject repository's visibility and the agents who
+      read it find it in their own repository. Requires a token with
+      contents:write on that repository.
+    required: false
+    default: ""
   token:
-    description: "GitHub token with contents:write permission on this repository."
+    description: >-
+      GitHub token with contents:write permission on the target repository
+      (this repository unless `repository` is set).
     required: true
 runs:
   using: composite
@@ -48,7 +62,7 @@ runs:
         RUN_ID: ${{ inputs.run-id }}
         MSG: ${{ inputs.commit-message }}
         GH_TOKEN: ${{ inputs.token }}
-        REPO: ${{ github.repository }}
+        REPO: ${{ inputs.repository || github.repository }}
       run: |
         set -uo pipefail
 
@@ -81,7 +95,7 @@ runs:
         prune_history() {
           [ -n "${HISTORY_DIR}" ] || return 0
           local retention cutoff dir base dir_date
-          retention="${RETENTION_DAYS:-30}"
+          retention="${RETENTION_DAYS:-7}"
           if [ "$retention" -gt 0 ] && [ -d "${tmp}/${HISTORY_DIR}" ]; then
             cutoff="$(date -u -d "${retention} days ago" +'%Y%m%d')"
             while IFS= read -r -d '' dir; do
@@ -153,6 +167,6 @@ runs:
         done
 
         if [ "$pushed" != "1" ]; then
-          echo "::warning::publish-ci-logs: failed to push '${DEST}' to ci-logs after retries."
+          echo "::warning::publish-ci-logs: failed to push '${DEST}' to ${REPO} ci-logs after retries."
         fi
         exit 0

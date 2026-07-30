@@ -144,7 +144,7 @@ jobs:
           source-dir: /tmp/ci-logs
           dest: sync/${{ matrix.consumer }}/latest
           history-dir: sync/${{ matrix.consumer }}/history
-          retention-days: "30"
+          retention-days: "7"
           run-id: ${{ github.run_id }}
           commit-message: "ci-logs: sync ${{ matrix.consumer }} (run ${{ github.run_id }})"
           token: ${{ secrets.OPS_SYNC_TOKEN }}

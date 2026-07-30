@@ -199,7 +199,7 @@ jobs:
           source-dir: logs/ci/_snapshot
           dest: branch-cleanup/latest
           history-dir: branch-cleanup/history
-          retention-days: "30"
+          retention-days: "7"
           run-id: ${{ github.run_id }}
           commit-message: "ci(logs): branch-cleanup run ${{ github.run_id }}"
           token: ${{ github.token }}
