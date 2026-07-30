@@ -211,12 +211,16 @@ jobs:
           # 渡すと publish-ephemeral の検証で run 全体が落ち、退避スライスを消せなくなる。
           # 改行入りの ID をそのまま渡さないことは安全上も要る——drop-slice は1行1名なので、
           # 複数行の ID は「複数のスライス名」に化けて無関係なスライスを消しうる。
-          # 判定は net-fetch.sh の structurally_valid_request_id と同一（`_invalid-*` の予約を含む）。
-          # 予約があるので、退避先 `_invalid-<digest>` がユーザーの選んだ request_id と衝突しない
-          # ——衝突を許すと、ある ID の cleanup が同名を使った**無関係な取得結果**を消してしまう。
+          # 検査は「素のスライス名か」だけで、**`_invalid-*` の予約はここでは適用しない**。
+          # 予約は net-fetch.sh 側（＝スライスを作る側）にあり、目的は退避先 `_invalid-<digest>` が
+          # ユーザーの選んだ request_id と衝突しないようにすること（衝突を許すと、ある ID の cleanup が
+          # 同名を使った無関係な取得結果を消す）。**消す側で同じ予約を掛けると逆に消せなくなる**:
+          # 予約導入より前に `_invalid-foo` のような ID で取得したスライスがブランチに残っていると、
+          # 生の名前を落として digest 側だけを渡すことになり、cleanup が緑のまま何も消さない
+          # （private では次の取得まで残りうる）。作る側だけを縛り、消す側は素のスライス名なら通す。
           names=""
           case "$REQUEST_ID" in
-            ''|*[!A-Za-z0-9._-]*|*..*|.|_invalid-*)
+            ''|*[!A-Za-z0-9._-]*|*..*|.)
               echo "request_id is not a bare slice name; dropping only the _invalid-<digest> fallback."
               ;;
             *) names="$REQUEST_ID" ;;
