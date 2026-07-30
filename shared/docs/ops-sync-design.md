@@ -137,7 +137,7 @@ consumer: エージェントが .ops-sync/outbox/<時刻>-<説明>.md を main �
       最古の提案を持つ consumer の提案をまとめて処理
         ├─ common-block-edit : AGENTS_COMMON.md を全文置換（ベースハッシュで鮮度検査・
         │                      常時層サイズの増減を取り込み PR に記載）
-        ├─ shared-file       : shared/<対象パス> を置換
+        ├─ shared-file       : shared/<対象パス> を全文置換（ベースハッシュで鮮度検査）
         ├─ task              : tasks/<対象リポジトリ>/ に登録
         ├─ task-done         : tasks/<提案元>/<対象ファイル> を削除
         └─ 不正な提案        : .ops-sync/outbox/rejected/ へエラーノート付きで差し戻し
