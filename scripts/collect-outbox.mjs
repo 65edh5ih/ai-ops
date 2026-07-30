@@ -48,9 +48,17 @@ function stripFrontmatter(text) {
   return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '').trim();
 }
 
-// 鮮度検査に使う内容ハッシュ（docs/outbox-proposal.md の「ベース」欄と同じ計算）
+// 鮮度検査に使う内容ハッシュ（docs/outbox-proposal.md の「ベース」欄と同じ計算）。
+// common-block-edit 用。AGENTS.md のマーカー間から切り出す都合で前後の空白が必ず変わるため trim する。
 function hash12(text) {
   return createHash('sha256').update(text.trim()).digest('hex').slice(0, 12);
+}
+
+// shared-file 用。こちらは**バイト一致で配る実ファイル**そのものなので、切り出しが無く trim する
+// 理由が無い。trim すると「末尾改行だけが変わった」ような境界だけの変更を検出できず、鮮度検査を
+// すり抜けた全文置換がその変更を黙って巻き戻す。
+function hashBytes12(buf) {
+  return createHash('sha256').update(buf).digest('hex').slice(0, 12);
 }
 
 // 提案ファイル名 → ブランチ名の一部（バッチの先頭提案から作る。同じバッチを再処理しても
@@ -298,7 +306,7 @@ for (const p of batch) {
     // ハッシュするが、apply-shared.mjs がバイト一致でコピーするので shared/<対象パス> と同値になる。
     // 提案元に最新の配布が届いていない状態で書かれた提案も不一致になるが、巻き戻る危険は同じなので
     // 区別せず要確認にする。
-    const existingFile = existsSync(targetAbs) ? readFileSync(targetAbs, 'utf8') : null;
+    const existingFile = existsSync(targetAbs) ? readFileSync(targetAbs) : null;
     const baseHash = meta['ベース'] || '';
     let staleNote = null;
     if (existingFile === null) {
@@ -311,7 +319,7 @@ for (const p of batch) {
         hold(p, `ベース付きだが shared/${targetRel} が存在しない`);
       }
     } else {
-      const currentHash = hash12(existingFile);
+      const currentHash = hashBytes12(existingFile);
       if (!baseHash) {
         staleNote = '- ⚠ 提案に `ベース:`（編集元ファイルのハッシュ）がありません。鮮度を機械判定できないため、差分をよく確認してください。';
         hold(p, 'ベース欄が無く鮮度を機械判定できない');

@@ -95,8 +95,12 @@ ops-sync への一括編集を依頼する（`対象リポジトリ:` に ops-sy
 （`<対象パス>` は consumer 側でも同じ相対パス）に対して計算する:
 
 ```sh
-node -e 'console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1],"utf8").trim()).digest("hex").slice(0,12))' <対象パス>
+node -e 'console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex").slice(0,12))' <対象パス>
 ```
+
+`common-block-edit` 側のコマンドと違い、**こちらは `.trim()` しない**（MUST NOT 足す）。共有実ファイルは
+バイト一致で配られるので前後の空白も差分であり、trim すると末尾改行だけの変更を検出できず、
+その変更が全文置換で黙って巻き戻る。
 
 **新規ファイルを追加する提案では `ベース:` を省略する**（MUST NOT 付ける。差し替える既存内容が
 無いため。付いていると「対象パスの誤り」として要確認になる）。
