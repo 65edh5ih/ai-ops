@@ -38,6 +38,27 @@ inputs:
       retain).
     required: false
     default: "3"
+  drop-slice:
+    description: >-
+      Name of a single slice under `slice-root` to delete regardless of its age,
+      in addition to the normal expiry pass. Used for cleanup-on-read: once the
+      agent has consumed a result there is no reason to keep it until the TTL.
+      Only a bare slice name is accepted (no `/`, no `.`/`..`); anything else is
+      refused so this input cannot be used to delete arbitrary paths. Empty
+      (the default) means "drop nothing extra".
+    required: false
+    default: ""
+  fail-on-publish-error:
+    description: >-
+      When "true", exit non-zero if the branch could not be pushed after all
+      retries, instead of only warning. Set this wherever a caller would
+      otherwise read a green run as proof that the branch was updated -- e.g.
+      cleanup-on-read (a green run means "the slice is gone") and the fetch job
+      (the result body lives only on the branch, so a failed publish means the
+      result is unreachable). Left "false" for the scheduled sweep, where a
+      transient failure is harmless because the next run retries.
+    required: false
+    default: "false"
   prune-only:
     description: >-
       When "true", only expire old slices (no slice is written). Used by the
@@ -61,6 +82,8 @@ runs:
         SLICE_ROOT: ${{ inputs.slice-root }}
         RETENTION_DAYS: ${{ inputs.retention-days }}
         PRUNE_ONLY: ${{ inputs.prune-only }}
+        DROP_SLICE: ${{ inputs.drop-slice }}
+        FAIL_ON_PUBLISH_ERROR: ${{ inputs.fail-on-publish-error }}
         MSG: ${{ inputs.commit-message }}
         GH_TOKEN: ${{ inputs.token }}
         REPO: ${{ github.repository }}
@@ -83,6 +106,34 @@ runs:
           ''|*[!0-9]*) RETENTION_DAYS=3 ;;
         esac
         [ "$RETENTION_DAYS" -gt 0 ] || RETENTION_DAYS=3
+
+        # Reject a malformed drop-slice here, NOT inside attempt_publish: the retry loop below
+        # treats every non-zero return as "branch moved or transient", so a validation error
+        # raised in there would be retried 5x and then downgraded to a warning with exit 0.
+        #
+        # Same structural policy as net-fetch.sh's structurally_valid_request_id: a shell `case`
+        # over the whole value (NOT grep, whose ^/$ match per line and would pass a multiline
+        # value whose first line looks fine). This rejects '/', '.', '..', and every control
+        # character, so the value can neither escape SLICE_ROOT nor smuggle a newline followed by
+        # a `::workflow command::` into the job log.
+        #
+        # The value is never echoed, even after passing validation: a caller can paste a
+        # secret-shaped id (`ghp_...` passes [A-Za-z0-9._-]+) and on a public runner the job log
+        # is world-readable. Correlation uses a short digest instead. Deliberately NOT duplicating
+        # net-fetch.sh's SECRET_PATTERNS here -- keeping a second copy of that list is exactly the
+        # drift AGENTS_COMMON warns about, and "never log it" covers the leak without a copy.
+        drop_tag=""
+        if [ -n "$DROP_SLICE" ]; then
+          case "$DROP_SLICE" in
+            # `.` must be listed on its own: it passes the charset test ('.' is allowed inside a
+            # name) and does not match *..*, yet `rm -rf <root>/.` targets SLICE_ROOT itself.
+            *[!A-Za-z0-9._-]*|*..*|.)
+              echo "::error::publish-ephemeral: drop-slice must match [A-Za-z0-9._-]+ and must not contain '..'. Refusing (value not echoed: it may hold a secret)."
+              exit 1
+              ;;
+          esac
+          drop_tag="sha256:$(printf '%s' "$DROP_SLICE" | sha256sum | cut -c1-12)"
+        fi
 
         tmp="$(mktemp -d)"
         cleanup() { rm -rf "$tmp"; }
@@ -133,6 +184,18 @@ runs:
             fi
           done < <(find "${tmp}/${SLICE_ROOT}" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
 
+          # ── drop one named slice regardless of age (cleanup-on-read) ──────
+          # DROP_SLICE is validated as a bare name before the retry loop, so by here it
+          # cannot escape SLICE_ROOT.
+          if [ -n "$DROP_SLICE" ]; then
+            if [ -d "${tmp}/${SLICE_ROOT}/${DROP_SLICE}" ]; then
+              echo "publish-ephemeral: dropping slice ${drop_tag} (cleanup-on-read)"
+              rm -rf "${tmp:?}/${SLICE_ROOT}/${DROP_SLICE}"
+            else
+              echo "publish-ephemeral: slice ${drop_tag} not present (already gone); nothing to drop."
+            fi
+          fi
+
           # ── write our own slice ──────────────────────────────────────────
           if [ "$PRUNE_ONLY" != "true" ]; then
             rm -rf "${tmp:?}/${DEST}"
@@ -180,6 +243,11 @@ runs:
         done
 
         if [ "$pushed" != "1" ]; then
+          # A caller that treats a green run as proof the branch changed must not get green here.
+          if [ "$FAIL_ON_PUBLISH_ERROR" = "true" ]; then
+            echo "::error::publish-ephemeral: failed to publish '${DEST:-<prune-only>}' to '${BRANCH}' after retries; the branch was NOT updated."
+            exit 1
+          fi
           echo "::warning::publish-ephemeral: failed to publish '${DEST:-<prune-only>}' to '${BRANCH}' after retries."
         fi
         exit 0
