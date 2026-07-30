@@ -220,9 +220,9 @@ GitHub Actions の月枠は**アカウント単位**で全 private リポジト�
 **押す前に「Actions の workflow を起動する」と分かる印を必ず付ける**（MUST）。印は「一目で他のボタンと
 区別できる見た目」＋「**ホバー不要で読める**テキスト」の2つセットで（`title` だけで済ませない。MUST NOT）、
 実装はそのリポジトリの UI 共通部品に1つ置いて参照する（個別ページに直書きしない）。**workflow を起動しない
-ボタンには付けない**（MUST NOT）。枠消費（アカウント共有の月枠）に言及してよいのは **private リポジトリの
-workflow のときだけ**——public リポジトリの実行は無料。対象判定・印の要件・実描画確認は
-[`docs/gha-trigger-ui.md`](docs/gha-trigger-ui.md)。
+ボタンには付けない**（MUST NOT）。枠消費（アカウント共有の月枠）に言及してよいのは、その run が**実際に枠を
+消費するときだけ**（典型は private ✕ GitHub-hosted runner。可視性だけでは決まらないので `runs-on` を見る）。
+対象判定・印の要件・実描画確認は [`docs/gha-trigger-ui.md`](docs/gha-trigger-ui.md)。
 
 ## D1 データベースを扱うとき
 
