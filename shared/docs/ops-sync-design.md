@@ -411,8 +411,8 @@ ops-sync は public なので、**その `ci-logs` に出したものは世界�
 
 `ci-logs` の置き場だけ分けても足りない。**public リポジトリの run ログは world-readable** で、しかも
 `ci-logs` と違って保持がリポジトリ設定（Artifact and log retention）任せ。ジョブログへ落ちる経路は3つあり、
-最初の1つを塞いだだけで安心すると残り2つから同じものが出る（実際、詳細ログの分離を入れた直後の run で
-`peter-evans/create-pull-request` 由来の変更ファイル一覧が公開ログに出ていた）:
+**最初の1つを塞いだだけでは残り2つから同じものが出る**——`ci-logs` への出力を分離しても、この3つを
+すべて塞がない限り公開ログから同じ内容が読める:
 
 1. **自分の `run:` の出力** → `tee` ではなくファイルへリダイレクトする。
 2. **`uses:` した action の出力** → 呼び出し側から抑制できない。`create-pull-request` は `git status` /
@@ -434,7 +434,8 @@ consumer 側にその状況が無いため。
 cross-repo バッチは**巡回対象に ops-sync 自身を含む**。このとき `actions/checkout` に `repository:` を
 渡しても `ref:` を省略すると、それが実行中のリポジトリ自身なら **workflow の ref**（＝dispatch した
 ブランチ）が取られる。取った木をそのまま `base: main` の PR にすると、**feature ブランチから手動
-dispatch しただけでブランチの差分が main へ自動マージされる**（`MERGE_MODE=direct`）。実際に起きた。
+dispatch しただけでブランチの差分が main へ自動マージされる**（`MERGE_MODE=direct`）——レビュー前の
+コードが main に入る経路になる。
 
 チェックアウトは役割で分ける（MUST）:
 
