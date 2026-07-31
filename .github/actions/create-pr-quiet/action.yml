@@ -77,7 +77,10 @@ runs:
           git config user.name 'ops-sync[bot]'
           git config user.email 'ops-sync@users.noreply.github.com'
           git checkout -B "$BRANCH" || exit 1
-          git add -A
+          # ステージに失敗したら**必ず落とす**（MUST）。`-e` は付けていないので、ここを見ないと
+          # index ロックや I/O エラーで空のまま下の「無差分」判定に落ち、変更が残っているのに
+          # 既存 PR を close して緑で終わる（下の close は破壊的なので、その手前で止める）。
+          git add -A || { echo "create-pr-quiet: git add failed"; exit 1; }
           if git diff --cached --quiet; then
             echo "create-pr-quiet: no changes; no PR"
             # **差分が消えたら、前の run が残した open な PR を閉じる**（MUST）。マージに失敗して PR が
