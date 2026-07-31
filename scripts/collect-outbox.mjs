@@ -43,9 +43,27 @@ function parseFrontmatter(text) {
   return meta;
 }
 
+const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n/;
+
 // frontmatter だけを除いた本文（**trim しない**）。バイトが意味を持つ用途で使う。
 function stripFrontmatterRaw(text) {
-  return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+  return text.replace(FRONTMATTER_RE, '');
+}
+
+// frontmatter を除いた本文を**バイトのまま**返す（shared-file 用）。
+// utf8 で読んだ文字列から切り出すと、不正な UTF-8 バイトが U+FFFD に化けたまま書き込まれ、
+// 「バイトそのまま」の保証が破れる（`ff fe 41` → `ef bf bd ef bf bd 41`）。
+// latin1 はバイトと文字が 1:1 に対応するので、境界の**バイト位置**をこれで求めて Buffer を切る
+// （frontmatter の区切りは ASCII のみ。UTF-8 の継続バイトは必ず 0x80 以上なので、多バイト文字の
+// 内部が `\n` や `-` と誤認されることはない）。
+function stripFrontmatterBytes(buf) {
+  const m = buf.toString('latin1').match(FRONTMATTER_RE);
+  return m ? buf.subarray(Buffer.byteLength(m[0], 'latin1')) : buf;
+}
+
+// 空とみなす本文（空 or ASCII 空白のみ）。上と同じ理由で文字列に変換せずバイトで見る。
+function isBlankBytes(buf) {
+  return buf.every((b) => b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d);
 }
 
 // frontmatter を除いた本文（前後の空白を落とす）。埋め込み・比較用。
@@ -320,8 +338,10 @@ for (const p of batch) {
     // **trim しない**（MUST）。shared-file はバイト一致で配る実ファイルそのもので、ベースハッシュも
     // バイト厳密に取っている。ここで trim して `+ '\n'` で書くと、提案本文と違うバイトが書き込まれ、
     // 「ベースが一致したので安全」と判定した後に境界バイトを黙って書き換えることになる。
-    const fileBody = stripFrontmatterRaw(raw);
-    if (!fileBody.trim()) {
+    // 提案ファイルを**バイトで読み直す**（`raw` は utf8 デコード済みで、不正な UTF-8 が
+    // U+FFFD に置き換わっている。frontmatter は自前の書式なので utf8 の `raw` から読んでよい）
+    const fileBody = stripFrontmatterBytes(readFileSync(p.file));
+    if (isBlankBytes(fileBody)) {
       reject(p, 'ファイル本文が空です');
       continue;
     }
