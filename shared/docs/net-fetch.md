@@ -133,10 +133,11 @@ allowlist・SSRF ガード・secret スキャンを workflow 側で enforce す�
      [`docs/outbox-proposal.md`](outbox-proposal.md) に従う**（MUST）——どちらの経路でも**追加を決めるのは
      ユーザーで、エージェントは自分でマージしない**という上の要求は変わらない（オーナーがどの PR を
      マージするかは経路と提案元の可視性で変わる。→ `docs/outbox-proposal.md`）。
-     **public repo（`ops-runner` 等）から outbox 提案で足す場合は、consumer 側 PR のマージだけでは終わらない**
-     ——ops-sync の取り込み PR は自動マージされないので、**そこまでオーナーがマージして初めて allowlist が
-     配布される**。ユーザーへの依頼にはこの2つ目のマージも含める（MUST。取り込み PR が open のまま
-     残っていることに気づかず「追加した」と報告すると、次の実行でまた同じドメインで止まる）。
+     **outbox 提案では、consumer 側 PR のマージで終わらないことがある**——提案元が public（`ops-runner`
+     等）か、機械確認に引っかかった場合、ops-sync の取り込み PR は自動マージされず、**そこまで
+     オーナーがマージして初めて allowlist が配布される**。ユーザーへの依頼にはこの2つ目のマージも
+     含める（MUST。取り込み PR が open のまま残っていることに気づかず「追加した」と報告すると、
+     次の実行でまた同じドメインで止まる）。
      ここで足りないのは
      **正本のある ops-sync** への手で、step 2 でセッションに足した実行先の ops-runner とは別物
      （ops-runner の承諾はここには使えない。allowlist の正本を直せるのは ops-sync だけ）。

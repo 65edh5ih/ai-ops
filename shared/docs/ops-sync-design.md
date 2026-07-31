@@ -37,7 +37,7 @@
 
 | ファイル | 唯一の書き手 |
 |---|---|
-| `AGENTS_COMMON.md`・`shared/**`・`tasks/**` | オーナーのマージ。直接 PR は ops-sync 側、outbox 提案は提案元 consumer 側の PR がその承認点で、private 発かつ機械確認を通れば ops-sync の取り込み PR は自動マージ（public 発は ops-sync 側でもレビュー＝計2回）。→「上りの認可」 |
+| `AGENTS_COMMON.md`・`shared/**`・`tasks/**` | オーナーのマージ。直接 PR は ops-sync 側、outbox 提案は提案元 consumer 側の PR がその承認点で、private 発かつ機械確認を通れば ops-sync の取り込み PR は自動マージ＝計1回（public 発・機械確認に引っかかった場合は ops-sync 側でもレビュー＝計2回）。→「上りの認可」 |
 | consumer の `AGENTS.md` マーカー区間 | ops-sync の sync CI |
 | consumer の `.ops-sync/sync-manifest.txt` に列挙されたファイル | ops-sync の sync CI |
 | consumer の `.ops-sync/outbox/*.md` | その consumer のエージェント |
