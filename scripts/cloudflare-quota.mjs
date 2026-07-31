@@ -91,7 +91,13 @@ async function api(path) {
     });
     let body = null;
     try { body = await res.json(); } catch { /* JSON でないことがある */ }
-    return { status: res.status, body };
+    // **CF が返す errors[] を落とさない**。status だけを note に残すと、次に見る人が原因を特定できず
+    // 同じ調査をやり直すことになる（実例: `status 400` だけが残り、per_page の上限超過だと分からなかった）。
+    // 出力先は public な ci-logs なので、code と message だけに絞る（本文全体は入れない）。
+    const errors = Array.isArray(body?.errors)
+      ? body.errors.map((x) => `${x?.code ?? '?'}: ${String(x?.message ?? '').slice(0, 120)}`).join(' / ')
+      : '';
+    return { status: res.status, body, errors };
   } catch (e) {
     return { status: 0, body: null, error: String(e?.message || e) };
   }
@@ -154,7 +160,7 @@ async function measurePages() {
   while (projectPage <= 200) {
     const projects = await api(`/accounts/${accountId}/pages/projects?page=${projectPage}&per_page=100`);
     if (projects.status !== 200 || !projects.body?.success) {
-      return { state: 'unknown', note: `pages projects list failed (status ${projects.status})` };
+      return { state: 'unknown', note: `pages projects list failed (status ${projects.status}${projects.errors ? ` — ${projects.errors}` : ''})` };
     }
     const items = projects.body.result || [];
     if (!items.length) {
@@ -228,7 +234,7 @@ async function measurePages() {
 async function measureWorkersBuilds() {
   const scripts = await api(`/accounts/${accountId}/workers/scripts`);
   if (scripts.status !== 200 || !scripts.body?.success) {
-    return { state: 'unknown', note: `workers scripts list failed (status ${scripts.status})` };
+    return { state: 'unknown', note: `workers scripts list failed (status ${scripts.status}${scripts.errors ? ` — ${scripts.errors}` : ''})` };
   }
   const tags = (scripts.body.result || []).map((s) => s?.tag).filter(Boolean);
   let usedMin = 0;
