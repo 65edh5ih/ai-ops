@@ -158,7 +158,10 @@ async function measurePages() {
   let lastFirstProject = null;
   let projectsComplete = false;
   while (projectPage <= 200) {
-    const projects = await api(`/accounts/${accountId}/pages/projects?page=${projectPage}&per_page=100`);
+    // **`per_page` は 25 まで**。100 を渡すと 400 `8000024: Invalid list options provided.` で拒否され、
+    // Pages 側の計測が丸ごと unknown に落ちる（API リファレンスに上限の記載は無く、実測で判明）。
+    // 下の deployments 呼び出しと同じ値に揃えてある——片方だけ変えると同じ罠に戻る。
+    const projects = await api(`/accounts/${accountId}/pages/projects?page=${projectPage}&per_page=25`);
     if (projects.status !== 200 || !projects.body?.success) {
       return { state: 'unknown', note: `pages projects list failed (status ${projects.status}${projects.errors ? ` — ${projects.errors}` : ''})` };
     }
