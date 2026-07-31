@@ -181,8 +181,18 @@ async function measurePages() {
     names.push(...items.map((p) => p?.name).filter(Boolean));
     // 完了判定は result_info を正とする。per_page を指定しない以上、1ページあたりの件数を
     // こちら側で決め打ちできない（items.length と定数を比べる判定は使えない）。
+    // **total_pages が読めないときに「1ページで完了」と見なさない**（MUST NOT: fail-open）。
+    // 2ページ目以降のプロジェクトを丸ごと数え落としたまま `ok` を出すことになり、
+    // この信号は自動退避の判断に使われるので「測れなかった」を `ok` として配るのが最悪。
+    // 数えられないなら unknown で止める（消費側は unknown を逼迫と同じに扱う）。
+    // 次に見る人が1回で原因を特定できるよう、result_info に何が入っていたか（**キーだけ**。
+    // 出力先が public な ci-logs なので値は載せない）を note に残す。
     const totalPages = Number(projects.body?.result_info?.total_pages);
-    if (!Number.isFinite(totalPages) || projectPage >= totalPages) {
+    if (!Number.isFinite(totalPages)) {
+      const keys = Object.keys(projects.body?.result_info || {}).join(',') || 'none';
+      return { state: 'unknown', note: `pages projects list has no usable total_pages (result_info keys: ${keys})` };
+    }
+    if (projectPage >= totalPages) {
       projectsComplete = true;
       break;
     }
