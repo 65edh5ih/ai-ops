@@ -34,7 +34,10 @@ jobs:
         id: signals
         run: |
           set -uo pipefail
-          git fetch origin ci-logs --depth=1 2>/dev/null || true
+          # ci-logs は publish のたびに orphan 1コミットへ書き換わるので **--force** で取り直す
+          # （既存の追跡refがあると古い内容を読み続ける。fresh checkout では起きないが、
+          #  キャッシュが効く構成に変わったときに黙って古い信号で判断するのを防ぐ）。
+          git fetch origin +refs/heads/ci-logs:refs/remotes/origin/ci-logs --force --depth=1 2>/dev/null || true
           {
             echo 'actions<<SIGEOF'
             git show origin/ci-logs:quota/actions/actions.json 2>/dev/null || echo ''

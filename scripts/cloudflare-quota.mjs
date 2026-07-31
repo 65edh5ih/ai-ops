@@ -91,7 +91,13 @@ async function api(path) {
     });
     let body = null;
     try { body = await res.json(); } catch { /* JSON でないことがある */ }
-    return { status: res.status, body };
+    // **CF が返す errors[] を落とさない**。status だけを note に残すと、次に見る人が原因を特定できず
+    // 同じ調査をやり直すことになる（実例: `status 400` だけが残り、per_page の上限超過だと分からなかった）。
+    // 出力先は public な ci-logs なので、code と message だけに絞る（本文全体は入れない）。
+    const errors = Array.isArray(body?.errors)
+      ? body.errors.map((x) => `${x?.code ?? '?'}: ${String(x?.message ?? '').slice(0, 120)}`).join(' / ')
+      : '';
+    return { status: res.status, body, errors };
   } catch (e) {
     return { status: 0, body: null, error: String(e?.message || e) };
   }
@@ -152,9 +158,15 @@ async function measurePages() {
   let lastFirstProject = null;
   let projectsComplete = false;
   while (projectPage <= 200) {
-    const projects = await api(`/accounts/${accountId}/pages/projects?page=${projectPage}&per_page=100`);
+    // **`per_page` を渡さない**。この一覧は `per_page` を付けると値によらず 400
+    // `8000024: Invalid list options provided.` で拒否される（100 と 25 の両方で実測。API リファレンスは
+    // `page` / `per_page` をどちらも optional としか書いておらず、上限も拒否条件も書かれていない）。
+    // 拒否されると Pages 側の計測が丸ごと unknown に落ちるので、**docs に無い任意パラメータを足さない**。
+    // ページ送りはレスポンスの `result_info.total_pages` で行う。
+    const q = projectPage > 1 ? `?page=${projectPage}` : '';
+    const projects = await api(`/accounts/${accountId}/pages/projects${q}`);
     if (projects.status !== 200 || !projects.body?.success) {
-      return { state: 'unknown', note: `pages projects list failed (status ${projects.status})` };
+      return { state: 'unknown', note: `pages projects list failed (status ${projects.status}${projects.errors ? ` — ${projects.errors}` : ''})` };
     }
     const items = projects.body.result || [];
     if (!items.length) {
@@ -167,8 +179,30 @@ async function measurePages() {
     }
     lastFirstProject = firstProject;
     names.push(...items.map((p) => p?.name).filter(Boolean));
-    const totalPages = Number(projects.body?.result_info?.total_pages);
-    if ((Number.isFinite(totalPages) && projectPage >= totalPages) || items.length < 100) {
+    // 完了判定は result_info を正とする。per_page を指定しない以上、1ページあたりの件数を
+    // こちら側で決め打ちできない（items.length と定数を比べる判定は使えない）。
+    // **total_pages が読めないときに「1ページで完了」と見なさない**（MUST NOT: fail-open）。
+    // 2ページ目以降のプロジェクトを丸ごと数え落としたまま `ok` を出すことになり、
+    // この信号は自動退避の判断に使われるので「測れなかった」を `ok` として配るのが最悪。
+    // 数えられないなら unknown で止める（消費側は unknown を逼迫と同じに扱う）。
+    // 次に見る人が1回で原因を特定できるよう、result_info に何が入っていたか（**キーだけ**。
+    // 出力先が public な ci-logs なので値は載せない）を note に残す。
+    // **coerce する前に生の値を検証する**。`Number(null)` も `Number('')` も `0` になり、
+    // 「有限の数」チェックを通ったうえで `projectPage >= 0` が真＝1ページ目で完了、に倒れる
+    // （fail-closed のつもりが fail-open のまま残る）。数として書かれていて、かつ
+    // **1以上の整数**であることまで見る。
+    const rawTotalPages = projects.body?.result_info?.total_pages;
+    const totalPages = typeof rawTotalPages === 'number'
+      ? rawTotalPages
+      : (typeof rawTotalPages === 'string' && rawTotalPages.trim() !== '' ? Number(rawTotalPages) : NaN);
+    if (!Number.isInteger(totalPages) || totalPages < 1) {
+      const keys = Object.keys(projects.body?.result_info || {}).join(',') || 'none';
+      return {
+        state: 'unknown',
+        note: `pages projects list has no usable total_pages (type: ${rawTotalPages === null ? 'null' : typeof rawTotalPages}; result_info keys: ${keys})`,
+      };
+    }
+    if (projectPage >= totalPages) {
       projectsComplete = true;
       break;
     }
@@ -228,7 +262,7 @@ async function measurePages() {
 async function measureWorkersBuilds() {
   const scripts = await api(`/accounts/${accountId}/workers/scripts`);
   if (scripts.status !== 200 || !scripts.body?.success) {
-    return { state: 'unknown', note: `workers scripts list failed (status ${scripts.status})` };
+    return { state: 'unknown', note: `workers scripts list failed (status ${scripts.status}${scripts.errors ? ` — ${scripts.errors}` : ''})` };
   }
   const tags = (scripts.body.result || []).map((s) => s?.tag).filter(Boolean);
   let usedMin = 0;
