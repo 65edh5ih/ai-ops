@@ -43,9 +43,14 @@ function parseFrontmatter(text) {
   return meta;
 }
 
-// frontmatter を除いた本文を返す
+// frontmatter だけを除いた本文（**trim しない**）。バイトが意味を持つ用途で使う。
+function stripFrontmatterRaw(text) {
+  return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+}
+
+// frontmatter を除いた本文（前後の空白を落とす）。埋め込み・比較用。
 function stripFrontmatter(text) {
-  return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '').trim();
+  return stripFrontmatterRaw(text).trim();
 }
 
 // 鮮度検査に使う内容ハッシュ（docs/outbox-proposal.md の「ベース」欄と同じ計算）。
@@ -312,8 +317,11 @@ for (const p of batch) {
       defer(p, `同一実行内に同じ対象パス "${targetRel}" への先行提案があるため次回に回します（全文置換どうしの衝突回避）`);
       continue;
     }
-    const fileBody = stripFrontmatter(raw);
-    if (!fileBody) {
+    // **trim しない**（MUST）。shared-file はバイト一致で配る実ファイルそのもので、ベースハッシュも
+    // バイト厳密に取っている。ここで trim して `+ '\n'` で書くと、提案本文と違うバイトが書き込まれ、
+    // 「ベースが一致したので安全」と判定した後に境界バイトを黙って書き換えることになる。
+    const fileBody = stripFrontmatterRaw(raw);
+    if (!fileBody.trim()) {
       reject(p, 'ファイル本文が空です');
       continue;
     }
@@ -350,7 +358,7 @@ for (const p of batch) {
     }
 
     mkdirSync(path.dirname(targetAbs), { recursive: true });
-    writeFileSync(targetAbs, fileBody + '\n');
+    writeFileSync(targetAbs, fileBody); // 提案本文をそのまま（→ 上のコメント）
     rmSync(p.file);
     sharedPathsDone.add(targetAbs);
     applied.push({
