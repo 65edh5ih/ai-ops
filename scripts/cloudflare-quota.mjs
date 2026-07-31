@@ -187,10 +187,20 @@ async function measurePages() {
     // 数えられないなら unknown で止める（消費側は unknown を逼迫と同じに扱う）。
     // 次に見る人が1回で原因を特定できるよう、result_info に何が入っていたか（**キーだけ**。
     // 出力先が public な ci-logs なので値は載せない）を note に残す。
-    const totalPages = Number(projects.body?.result_info?.total_pages);
-    if (!Number.isFinite(totalPages)) {
+    // **coerce する前に生の値を検証する**。`Number(null)` も `Number('')` も `0` になり、
+    // 「有限の数」チェックを通ったうえで `projectPage >= 0` が真＝1ページ目で完了、に倒れる
+    // （fail-closed のつもりが fail-open のまま残る）。数として書かれていて、かつ
+    // **1以上の整数**であることまで見る。
+    const rawTotalPages = projects.body?.result_info?.total_pages;
+    const totalPages = typeof rawTotalPages === 'number'
+      ? rawTotalPages
+      : (typeof rawTotalPages === 'string' && rawTotalPages.trim() !== '' ? Number(rawTotalPages) : NaN);
+    if (!Number.isInteger(totalPages) || totalPages < 1) {
       const keys = Object.keys(projects.body?.result_info || {}).join(',') || 'none';
-      return { state: 'unknown', note: `pages projects list has no usable total_pages (result_info keys: ${keys})` };
+      return {
+        state: 'unknown',
+        note: `pages projects list has no usable total_pages (type: ${rawTotalPages === null ? 'null' : typeof rawTotalPages}; result_info keys: ${keys})`,
+      };
     }
     if (projectPage >= totalPages) {
       projectsComplete = true;
