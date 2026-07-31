@@ -75,25 +75,36 @@ jobs:
           set -uo pipefail
           node scripts/archive-task-history.mjs target > /tmp/ci-logs/archive.log 2>&1
 
+      - name: Write archive PR body
+        run: |
+          cat > "${{ runner.temp }}/archive-pr-body.md" << 'EOF'
+          タスク履歴の保守（規約: `docs/task-history.md`。本文はそのまま・移動のみ）:
+
+          - `docs/history-inbox/` の未統合フラグメントを `docs/AI_TASK_HISTORY.md` へ取り込み、
+            取り込んだフラグメントを削除します。
+          - 取り込み後、保持量（直近2作業日分）を超えた古い日付のエントリを `docs/history-archive/` へ移します。
+
+          この PR は ops-sync の archive-task-history workflow（1日1回の集中バッチ）が自動生成しました。
+          EOF
+
+      # peter-evans/create-pull-request を使わない（→ docs/ci-logs.md 手順A-6）。あの action は
+      # `git status` / `git commit` の出力をジョブログへ流すので、**対象リポジトリのファイル名
+      # （＝private のタスクスラッグ）が public な ops-sync の run ログに載る**。`uses:` ステップの
+      # 出力は呼び出し側から抑制できないため、git 操作ごと自前 action に移して出力を詳細ログ
+      # （対象リポジトリ行き）へリダイレクトする。
       - name: Create or update archive PR
         id: create-pr
-        uses: peter-evans/create-pull-request@v8
+        uses: ./.github/actions/create-pr-quiet
         with:
-          token: ${{ secrets.OPS_SYNC_TOKEN }}
           path: target
+          repository: ${{ matrix.repo }}
           base: main
           branch: ops-sync/archive-task-history
-          delete-branch: true
           commit-message: 'chore: consolidate task history fragments and archive overflow'
           title: 'chore: タスク履歴フラグメントの統合と古いエントリのアーカイブ'
-          body: |
-            タスク履歴の保守（規約: `docs/task-history.md`。本文はそのまま・移動のみ）:
-
-            - `docs/history-inbox/` の未統合フラグメントを `docs/AI_TASK_HISTORY.md` へ取り込み、
-              取り込んだフラグメントを削除します。
-            - 取り込み後、保持量（直近2作業日分）を超えた古い日付のエントリを `docs/history-archive/` へ移します。
-
-            この PR は ops-sync の archive-task-history workflow（1日1回の集中バッチ）が自動生成しました。
+          body-path: ${{ runner.temp }}/archive-pr-body.md
+          log-file: /tmp/ci-logs/create-pr.log
+          token: ${{ secrets.OPS_SYNC_TOKEN }}
 
       - name: Merge archive PR (per MERGE_MODE)
         if: env.MERGE_MODE != 'off' && steps.create-pr.outputs.pull-request-url != ''
@@ -101,11 +112,13 @@ jobs:
           GH_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
         run: |
           url="${{ steps.create-pr.outputs.pull-request-url }}"
+          # --delete-branch は create-pull-request の delete-branch: true の代わり
+          # （自前 PR 作成に移したので、使い捨てブランチの後始末はこちらで行う）。
           if [ "$MERGE_MODE" = "direct" ]; then
-            gh pr merge --squash "$url" \
+            gh pr merge --squash --delete-branch "$url" \
               || echo "::warning::direct merge failed; PR left open: $url"
           else
-            gh pr merge --auto --squash "$url" \
+            gh pr merge --auto --squash --delete-branch "$url" \
               || echo "::warning::auto-merge could not be enabled; PR left open: $url"
           fi
 
