@@ -107,12 +107,13 @@ consumer へ伝播する（追加しかできない実装だと撤去がドリ�
 | `.github/workflows/sync.yml` | （下り）main の変更＋cron（1日1回の再適用＝手編集ドリフトの自己修復）で各 consumer へ同期 PR を生成し、MERGE_MODE に応じてマージ |
 | `consumers.txt` | 配布先リポジトリ（`owner/repo`） |
 | `scripts/collect-outbox.mjs` | （上り）consumer の `.ops-sync/outbox/*.md` 提案を種別に応じて反映（1 consumer 分をまとめて処理・不正な提案は `rejected/` へ差し戻し） |
-| `.github/workflows/collect-outbox.yml` | （上り）cron（約6時間ごと）＋手動で起動、取り込み PR＋outbox 掃除 PR を生成。あわせてトゥームストーン掃除（保守）。処理ログ（提案名・却下理由）は**提案元 consumer の `ci-logs`** へ、ops-sync には件数だけ |
+| `.github/workflows/collect-outbox.yml` | （上り）cron（約6時間ごと）＋手動で起動、取り込み PR＋outbox 掃除 PR を生成。あわせてトゥームストーン掃除（保守）。処理ログ（提案名・却下理由）は**提案元 consumer の `ci-logs`** へ、ops-sync には件数だけ。consumer 側の掃除 PR は `create-pr-quiet` で作る（取り込み・トゥームストーンは ops-sync 自身への PR なので従来どおり `peter-evans/create-pull-request`） |
 | `scripts/archive-task-history.mjs` | （保守）`docs/history-inbox/` のフラグメントを `docs/AI_TASK_HISTORY.md` へ統合し、保持量超過分を `docs/history-archive/` へ移す |
 | `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ops-sync＋全 consumer を巡回し、未統合フラグメントか超過エントリがあれば統合＋アーカイブ PR を生成・マージ。処理ログ（フラグメント名）は**対象リポジトリの `ci-logs`** へ、ops-sync には件数だけ |
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer から対象が消えた）を刈る |
 | `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から**未 resolve の Codex レビュースレッド**を集め、全体一覧＋**private consumer 分だけ**のスライスに落とす |
 | `.github/workflows/codex-review-inbox.yml` | （信号）cron（毎時）＋手動で上記を実行し、全体一覧を private の `.ops-sync/codex-review-inbox-all.md`、private consumer の自分の分を `.ops-sync/codex-review-inbox.md` へ直接 push（内容に変化があるときだけ）。public repo は全体一覧だけ |
+| `.github/actions/create-pr-quiet/` | （内部）**他リポジトリへ commit する PR** の作成・更新。git 操作を `run:` の中で行い、出力を詳細ログへ逃がす（`peter-evans/create-pull-request` は変更ファイル名をジョブログへ流すため。下記「ログの公開先は『何についてのログか』で決める」）。ops-sync ローカルで consumer には配らない |
 | `shared/.github/actions/publish-ci-logs/` | （下り・ファイル）恒久ログ（`ci-logs` ブランチ）への publish。既定は実行リポジトリだが、`repository:` 入力で**他リポジトリの `ci-logs`** に出せる（下記「ログの公開先は『何についてのログか』で決める」） |
 | `shared/.github/actions/publish-ephemeral/` | （下り・ファイル）揮発ブランチへの publish。毎回 orphan 1コミットへ書き換え＋TTL 失効＋`--force-with-lease`。恒久ログ用の `publish-ci-logs` と対（下記「揮発する出力と恒久ログを分ける」） |
 
@@ -405,6 +406,28 @@ ops-sync は public なので、**その `ci-logs` に出したものは世界�
 （可視性の自動一致・読み手と同一リポジトリ）が同時に満たせるのはこの形だけだから。Codex レビューの
 全体一覧を private に寄せているのは、あれが**人が1本開いてトリアージする成果物**で、読み手も置き場も
 1つだから（性質が違う）。
+
+### ジョブログも同じ扱いにする（漏れる経路は3つ）
+
+`ci-logs` の置き場だけ分けても足りない。**public リポジトリの run ログは world-readable** で、しかも
+`ci-logs` と違って保持がリポジトリ設定（Artifact and log retention）任せ。ジョブログへ落ちる経路は3つあり、
+最初の1つを塞いだだけで安心すると残り2つから同じものが出る（実際、詳細ログの分離を入れた直後の run で
+`peter-evans/create-pull-request` 由来の変更ファイル一覧が公開ログに出ていた）:
+
+1. **自分の `run:` の出力** → `tee` ではなくファイルへリダイレクトする。
+2. **`uses:` した action の出力** → 呼び出し側から抑制できない。`create-pull-request` は `git status` /
+   `git commit` をそのまま流すので、**対象リポジトリへ commit する PR 作成は `.github/actions/create-pr-quiet`
+   に置き換えた**（git 操作を `run:` に持ち込み、出力を詳細ログへ逃がす自前 action）。ops-sync 自身への
+   PR（取り込み・トゥームストーン整理）は公開されて当然なので `create-pull-request` のまま——実績のある
+   action を必要の無い範囲まで置き換えない。
+3. **`with:` に渡す値そのもの**（`uses:` ステップの入力は必ずログに出る） → ブランチ名・タイトルを対象の
+   中身から作らない。cleanup ブランチは提案ファイル名の 12 桁ハッシュにしてある（同じ入力で同じ名前になる
+   性質は保ちつつ、名前から中身を復元できない）。intake 側は public な ops-sync に立つブランチで、提案内容
+   自体が公開 PR になるので slug のまま。
+
+手順は `docs/ci-logs.md` 手順A-6。`create-pr-quiet` は**consumer へ配らない**（`shared/` に置かない）——
+必要なのは「public な実行リポジトリから private リポジトリへ commit する」cross-repo バッチだけで、
+consumer 側にその状況が無いため。
 
 ## 揮発する出力と恒久ログを分ける
 

@@ -46,10 +46,17 @@ jobs:
       - name: Checkout ops-sync (script source)
         uses: actions/checkout@v5
 
+      # **`ref: main` を明示する（MUST）**。`repository:` を指定しても、それが**この workflow を
+      # 走らせているリポジトリ自身**（＝巡回対象に含む ops-sync）だと、actions/checkout は ref 省略時に
+      # **workflow の ref**（= dispatch したブランチ）を取る。すると統合対象がそのブランチの木になり、
+      # `base: main` の PR にブランチの差分がまるごと乗って **MERGE_MODE=direct で main へ自動マージ**
+      # される——feature ブランチから手動 dispatch しただけでレビュー無しに main が動く。実際に起きた。
+      # 上の「script source」側は ref 省略のままでよい（そちらは意図的に workflow の ref を使う）。
       - name: Checkout target repo
         uses: actions/checkout@v5
         with:
           repository: ${{ matrix.repo }}
+          ref: main
           token: ${{ secrets.OPS_SYNC_TOKEN }}
           path: target
 

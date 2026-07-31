@@ -77,9 +77,26 @@ runs:
           git config user.name 'ops-sync[bot]'
           git config user.email 'ops-sync@users.noreply.github.com'
           git checkout -B "$BRANCH" || exit 1
-          git add -A
+          # ステージに失敗したら**必ず落とす**（MUST）。`-e` は付けていないので、ここを見ないと
+          # index ロックや I/O エラーで空のまま下の「無差分」判定に落ち、変更が残っているのに
+          # 既存 PR を close して緑で終わる（下の close は破壊的なので、その手前で止める）。
+          git add -A || { echo "create-pr-quiet: git add failed"; exit 1; }
           if git diff --cached --quiet; then
             echo "create-pr-quiet: no changes; no PR"
+            # **差分が消えたら、前の run が残した open な PR を閉じる**（MUST）。マージに失敗して PR が
+            # open のまま残り（各ワークフローは失敗を握って PR を残す）、その後べつの経路で同じ内容が
+            # main に入ると、次の run は無差分になってこの枝を通る。ここで何もしないと、実体の無い PR と
+            # ブランチが永久に残る——置き換え前の create-pull-request は delete-branch: true でこれを
+            # 閉じていたので、放置は挙動の後退になる。
+            stale="$(gh pr list -R "$REPO" --head "$BRANCH" --base "$BASE" --state open --json url --jq '.[0].url // ""')"
+            if [ -n "$stale" ]; then
+              # コメントは**対象の中身に触れない**一般文にする（PR は対象リポジトリ側だが、
+              # ここで組み立てる文字列を増やさない方が事故が起きにくい）。
+              gh pr close "$stale" -R "$REPO" --delete-branch \
+                --comment 'ops-sync のバッチ: 差分が無くなったため close します（同じ内容が別経路で main に入っています）。' \
+                && echo "create-pr-quiet: closed stale PR (diff disappeared)" \
+                || echo "create-pr-quiet: failed to close stale PR"
+            fi
           else
             git commit -q -m "$MSG" || exit 1
             # ブランチは毎回このバッチが作り直す使い捨てなので force で上書きしてよい
@@ -89,6 +106,11 @@ runs:
             existing="$(gh pr list -R "$REPO" --head "$BRANCH" --base "$BASE" --state open --json url --jq '.[0].url // ""')"
             if [ -n "$existing" ]; then
               url="$existing"
+              # **タイトルと本文も貼り直す**（MUST）。同じブランチを再利用するのは「前回の PR がまだ
+              # open で、今回その内容が増えた」ときで、差分だけ force-push して本文を据え置くと
+              # PR が実際の変更より少なく見える（例: cleanup PR に、後から増えた削除・差し戻しの
+              # 一覧と却下理由が載らない）。置き換え前の create-pull-request は毎回更新していた。
+              gh pr edit "$existing" -R "$REPO" --title "$TITLE" --body-file "$BODY" || exit 1
               echo "create-pr-quiet: updated existing PR"
             else
               # gh pr create は URL を stdout に出す。コマンド置換で拾うのでログには落ちない。

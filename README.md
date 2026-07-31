@@ -48,9 +48,10 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 | `scripts/new-task-history.mjs` | ops-sync自身が上記正本をconsumerと同じパスで使うためのsymlink |
 | `.github/workflows/sync.yml` | （下り）変更時＋cron（1日1回の再適用＝手編集ドリフトの自己修復）で各 consumer へ同期PRを自動生成（MERGE_MODE で自動マージ可） |
 | `scripts/collect-outbox.mjs` | （上り）consumer の `.ops-sync/outbox/*.md` 提案を種別に応じて反映（1 consumer 分をまとめて処理・全文置換の提案〔`common-block-edit`／`shared-file`〕はベースハッシュで鮮度検査・不正な提案は `rejected/` へ差し戻し・自動マージの可否を判定して出力） |
-| `.github/workflows/collect-outbox.yml` | （上り）cron（約6時間ごと）＋手動で提案を拾い、取り込みPR＋掃除PRを生成。提案元が private かつベース一致かつ常時層の増加が上限内なら両PRを自動マージし、そうでなければ open のまま残して run を失敗させる（レビュー待ち・差し戻しに気づくため）。あわせてトゥームストーン掃除。処理ログは提案元 consumer の `ci-logs` へ、ops-sync には件数だけ |
+| `.github/workflows/collect-outbox.yml` | （上り）cron（約6時間ごと）＋手動で提案を拾い、取り込みPR＋掃除PRを生成。提案元が private かつベース一致かつ常時層の増加が上限内なら両PRを自動マージし、そうでなければ open のまま残して run を失敗させる（レビュー待ち・差し戻しに気づくため）。あわせてトゥームストーン掃除。処理ログは提案元 consumer の `ci-logs` へ、ops-sync には件数だけ。consumer 側の掃除PRは `create-pr-quiet` で作る |
 | `scripts/archive-task-history.mjs` | （保守）`docs/history-inbox/` のフラグメントを本体へ統合し、保持量超過分を `docs/history-archive/` へ移す |
 | `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ops-sync＋全 consumer を巡回し、未統合フラグメント／超過分の統合＋アーカイブPRを生成・マージ。処理ログは対象リポジトリの `ci-logs` へ、ops-sync には件数だけ |
+| `.github/actions/create-pr-quiet/` | （内部）他リポジトリへ commit する PR の作成・更新。変更ファイル名を public な ops-sync のジョブログに出さないため、git 操作を `run:` に持ち込んで出力を詳細ログへ逃がす（consumer には配布しない） |
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer で削除済み）を自動で刈る |
 | `scripts/actions-quota.mjs` | （信号）billing API で Actions 月枠の使用率を測り、`ok`/`tight`/`exhausted`/`unknown` の粗い state に落とす |
 | `.github/workflows/actions-quota.yml` | （信号）cron（6時間ごと）で上記を実行し `ci-logs` の `quota/actions/actions.json` へ publish。エージェントが private repo で workflow を回してよいかの判断に使う（手順: `shared/docs/actions-quota.md`） |
