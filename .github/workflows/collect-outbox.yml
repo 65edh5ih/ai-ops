@@ -36,9 +36,20 @@ jobs:
       # consumer の clone を ops-sync のチェックアウト内に置くと、取り込み PR 作成時の
       # git add -A が nested repo を gitlink として拾ってしまう。ops-sync と consumers を
       # workspace 直下の兄弟ディレクトリに分離する。
-      - name: Checkout ops-sync
+      # **チェックアウトを2つに分ける**。片方は「動かすコード」（スクリプト・ローカル action）で、
+      # feature ブランチから dispatch して検証できるよう **workflow の ref** を取る。もう片方は
+      # 「書き換えて PR にする木」で、**必ず `ref: main`**（MUST）。1つで兼ねると、ブランチから
+      # dispatch しただけで取り込み PR にそのブランチの差分が丸ごと乗り、`base: main` の PR として
+      # マージされる——レビュー前のコードが main に入る（archive-task-history で実際に起きた）。
+      - name: Checkout ops-sync (script source)
         uses: actions/checkout@v5
         with:
+          path: ops-sync-src
+
+      - name: Checkout ops-sync (intake working tree)
+        uses: actions/checkout@v5
+        with:
+          ref: main
           path: ops-sync
 
       # ログは2つに分ける（→ docs/ci-logs.md「ログの公開先」）。処理ログは提案のファイル名と却下理由を
@@ -109,7 +120,7 @@ jobs:
         # ジョブログ側から同じものが読めてしまう。詳細は提案元 consumer の ci-logs で読む。
         run: |
           set -uo pipefail
-          node ops-sync/scripts/collect-outbox.mjs ops-sync/AGENTS_COMMON.md consumers ops-sync \
+          node ops-sync-src/scripts/collect-outbox.mjs ops-sync/AGENTS_COMMON.md consumers ops-sync \
             > /tmp/ci-logs/collect-outbox.log 2>&1
 
       - name: Record collect result
@@ -187,7 +198,7 @@ jobs:
       - name: Open cleanup PR to consumer (remove/reject processed proposals)
         id: cleanup-pr
         if: steps.collect.outputs.consumer_changed == 'true'
-        uses: ./ops-sync/.github/actions/create-pr-quiet
+        uses: ./ops-sync-src/.github/actions/create-pr-quiet
         with:
           path: ${{ steps.collect.outputs.consumer_dir }}
           repository: ${{ steps.collect.outputs.consumer }}
@@ -239,13 +250,14 @@ jobs:
       - name: Checkout ops-sync (tombstone prune)
         uses: actions/checkout@v5
         with:
+          ref: main
           path: ops-sync-prune
 
       # 掃除対象は ops-sync 自身の sync-deletions.txt（public な正本の中身）なので公開側へ。
       - name: Prune completed tombstones from sync-deletions.txt
         run: |
           set -uo pipefail
-          node ops-sync/scripts/prune-tombstones.mjs ops-sync-prune consumers 2>&1 \
+          node ops-sync-src/scripts/prune-tombstones.mjs ops-sync-prune consumers 2>&1 \
             | tee /tmp/ci-logs-public/prune-tombstones.log
 
       - name: Open tombstone prune PR
@@ -275,7 +287,7 @@ jobs:
       # 提案が1件も無い run では consumer が決まらないので publish しない（出す相手がいない）。
       - name: Publish detailed CI logs to the source consumer
         if: always() && steps.collect.outputs.consumer != ''
-        uses: ./ops-sync/.github/actions/publish-ci-logs
+        uses: ./ops-sync-src/.github/actions/publish-ci-logs
         with:
           repository: ${{ steps.collect.outputs.consumer }}
           source-dir: /tmp/ci-logs
@@ -288,7 +300,7 @@ jobs:
 
       - name: Publish public roll-up
         if: always()
-        uses: ./ops-sync/.github/actions/publish-ci-logs
+        uses: ./ops-sync-src/.github/actions/publish-ci-logs
         with:
           source-dir: /tmp/ci-logs-public
           dest: collect-outbox/latest

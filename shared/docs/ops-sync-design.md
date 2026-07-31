@@ -429,6 +429,24 @@ ops-sync は public なので、**その `ci-logs` に出したものは世界�
 必要なのは「public な実行リポジトリから private リポジトリへ commit する」cross-repo バッチだけで、
 consumer 側にその状況が無いため。
 
+### 「動かすコード」と「書き換える木」の ref を分ける
+
+cross-repo バッチは**巡回対象に ops-sync 自身を含む**。このとき `actions/checkout` に `repository:` を
+渡しても `ref:` を省略すると、それが実行中のリポジトリ自身なら **workflow の ref**（＝dispatch した
+ブランチ）が取られる。取った木をそのまま `base: main` の PR にすると、**feature ブランチから手動
+dispatch しただけでブランチの差分が main へ自動マージされる**（`MERGE_MODE=direct`）。実際に起きた。
+
+チェックアウトは役割で分ける（MUST）:
+
+- **動かすコード**（スクリプト・ローカル action）… `ref` 省略＝workflow の ref。ブランチから dispatch して
+  マージ前に挙動を検証できるのは、この側が workflow の ref を取るからで、これは意図した動作。
+- **書き換えて PR にする木**（対象リポジトリのチェックアウト・取り込み用の ops-sync チェックアウト）…
+  **`ref: main` を明示**。PR の base と一致させる。
+
+`archive-task-history` は対象チェックアウトを、`collect-outbox` は取り込み用と
+トゥームストーン掃除用のチェックアウトを、それぞれ `ref: main` で固定してある
+（`collect-outbox` はスクリプト用に `ops-sync-src` を別途チェックアウトする）。
+
 ## 揮発する出力と恒久ログを分ける
 
 CI が生む出力には性質の違う2種類があり、**同じブランチに混ぜると片方の要求を満たせなくなる**ので分けている。
