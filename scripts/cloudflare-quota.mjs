@@ -168,17 +168,20 @@ async function measurePages() {
     if (projects.status !== 200 || !projects.body?.success) {
       return { state: 'unknown', note: `pages projects list failed (status ${projects.status}${projects.errors ? ` — ${projects.errors}` : ''})` };
     }
-    const items = projects.body.result || [];
-    if (!items.length) {
-      projectsComplete = true;
-      break;
+    // `result` が配列でないなら応答形が壊れている。`|| []` で空配列に潰すと
+    // 「プロジェクトが1つも無いアカウント」と見分けがつかなくなり、`used=0` から `ok` を出す。
+    const rawResult = projects.body?.result;
+    if (!Array.isArray(rawResult)) {
+      return {
+        state: 'unknown',
+        note: `pages projects list result is not an array (type: ${rawResult === null ? 'null' : typeof rawResult})`,
+      };
     }
-    const firstProject = items[0]?.name ?? null;
-    if (firstProject !== null && firstProject === lastFirstProject) {
-      return { state: 'unknown', note: 'pages projects pagination did not advance' };
-    }
-    lastFirstProject = firstProject;
-    names.push(...items.map((p) => p?.name).filter(Boolean));
+    const items = rawResult;
+    // **ページング情報の検証は、空ページを「終わり」と認めるより前に行う**。空を先に受け入れると、
+    // 応答形が壊れているだけのケースまで「プロジェクトが1つも無いアカウント」として通り、
+    // `used=0` から `ok` が出る（検証を素通りした `ok`）。
+    //
     // 完了判定は result_info を正とする。per_page を指定しない以上、1ページあたりの件数を
     // こちら側で決め打ちできない（items.length と定数を比べる判定は使えない）。
     // **total_pages が読めないときに「1ページで完了」と見なさない**（MUST NOT: fail-open）。
@@ -190,18 +193,38 @@ async function measurePages() {
     // **coerce する前に生の値を検証する**。`Number(null)` も `Number('')` も `0` になり、
     // 「有限の数」チェックを通ったうえで `projectPage >= 0` が真＝1ページ目で完了、に倒れる
     // （fail-closed のつもりが fail-open のまま残る）。数として書かれていて、かつ
-    // **1以上の整数**であることまで見る。
+    // **0以上の整数**であることまで見る（0 は「プロジェクトが1つも無い」の表現になりうるので許す。
+    // 中身が有るページで 0 が来るのは矛盾なので下で弾く）。
     const rawTotalPages = projects.body?.result_info?.total_pages;
     const totalPages = typeof rawTotalPages === 'number'
       ? rawTotalPages
       : (typeof rawTotalPages === 'string' && rawTotalPages.trim() !== '' ? Number(rawTotalPages) : NaN);
-    if (!Number.isInteger(totalPages) || totalPages < 1) {
+    if (!Number.isInteger(totalPages) || totalPages < 0) {
       const keys = Object.keys(projects.body?.result_info || {}).join(',') || 'none';
       return {
         state: 'unknown',
         note: `pages projects list has no usable total_pages (type: ${rawTotalPages === null ? 'null' : typeof rawTotalPages}; result_info keys: ${keys})`,
       };
     }
+    if (!items.length) {
+      // 空ページを「プロジェクトが1つも無いアカウント」と認めるのは、**API がそう言っているときだけ**
+      // （1ページ目 かつ total_pages が 0 か 1）。まだページが残っているはずの位置で空が返るのは
+      // 応答の不整合なので、数え落としたまま `ok` を出さずに unknown で止める。
+      if (projectPage === 1 && totalPages <= 1) {
+        projectsComplete = true;
+        break;
+      }
+      return { state: 'unknown', note: `pages projects list returned an empty page while more were expected (page ${projectPage} of ${totalPages})` };
+    }
+    if (totalPages < 1) {
+      return { state: 'unknown', note: 'pages projects list reported total_pages=0 for a nonempty page' };
+    }
+    const firstProject = items[0]?.name ?? null;
+    if (firstProject !== null && firstProject === lastFirstProject) {
+      return { state: 'unknown', note: 'pages projects pagination did not advance' };
+    }
+    lastFirstProject = firstProject;
+    names.push(...items.map((p) => p?.name).filter(Boolean));
     if (projectPage >= totalPages) {
       projectsComplete = true;
       break;
