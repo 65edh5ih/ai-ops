@@ -257,6 +257,28 @@ GitHub Actions の枠が尽きたときの退避先は Cloudflare だが、**CF 
 - **測れなければ必ず `unknown`**（＝消費側は逼迫扱い）。ページングが進まない場合も過少カウント＝
   fail-open になるので `unknown` に倒す。
 
+#### 経路の推奨（判断と実行の分離）
+
+`deploy-route-reconcile.yml`（cron 6時間ごと）が上の2信号を読み、**各対象にとって望ましい経路**を
+`ci-logs` の `deploy-route/decision.json` に publish する。**切替はしない**。
+
+**判断と実行を分けているのは、public 側に権限を集中させないため**（上の MUST NOT を守る）:
+
+| | 場所 | 資格情報 | 頻度 |
+|---|---|---|---|
+| 判断 | ops-sync（public） | **不要**（consumer にも CF にもアクセスしない） | 6時間ごと・Actions 分は無料 |
+| 実行 | 各 consumer（private） | 自分の CF トークンと変数書き込みトークン | 切替が要るときだけ |
+
+判断側が consumer の状態（policy が `auto` か・CF が実際に出せるか・`HUGO_VERSION` が合っているか）を
+**持たない**ことが、資格情報を持たないことと表裏一体になっている。読み手（consumer）が自分で確かめる。
+
+- **推奨は片方向ずつ条件が違う**: `github → cloudflare` は「Actions が逼迫 **かつ** 逃げ先の CF リソースが
+  `ok`」、`cloudflare → github` は「Actions が `ok`」だけ（戻る先が空いていれば戻ってよい）。
+- **CF は対象の種類に対応するリソースだけ見る**（Pages 対象は `pages_builds`、Workers 対象は
+  `workers_build_minutes`）。全体 state は片方が `unknown` だと `unknown` に落ちるので、それで両方を止めない。
+- **信号が無い・壊れている・古いときは推奨を出さない**（`route: null`）。推測で動かすと、実態と逆向きに
+  倒して枠を焼くか配信を止めるかのどちらかになる。
+
 #### タスク履歴の統合とアーカイブ
 
 エージェントは履歴を `docs/AI_TASK_HISTORY.md` へ直接追記せず、**1エントリ＝1ファイル**で
