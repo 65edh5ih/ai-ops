@@ -37,7 +37,7 @@
 
 | ファイル | 唯一の書き手 |
 |---|---|
-| `AGENTS_COMMON.md`・`shared/**`・`tasks/**` | オーナーのマージ。直接 PR は ops-sync 側、outbox 提案は提案元 consumer 側の PR がその承認点で、条件を満たせば ops-sync の取り込み PR は自動マージ。→「上りの認可」 |
+| `AGENTS_COMMON.md`・`shared/**`・`tasks/**` | オーナーのマージ。直接 PR は ops-sync 側、outbox 提案は提案元 consumer 側の PR がその承認点で、private 発かつ機械確認を通れば ops-sync の取り込み PR は自動マージ＝計1回（public 発・機械確認に引っかかった場合は ops-sync 側でもレビュー＝計2回）。→「上りの認可」 |
 | consumer の `AGENTS.md` マーカー区間 | ops-sync の sync CI |
 | consumer の `.ops-sync/sync-manifest.txt` に列挙されたファイル | ops-sync の sync CI |
 | consumer の `.ops-sync/outbox/*.md` | その consumer のエージェント |
@@ -162,17 +162,19 @@ consumer: エージェントが .ops-sync/outbox/<時刻>-<説明>.md を main �
 
 **自動マージが見ているのは「提案が書かれた後に前提が変わっていないか」だけ**で、提案内容そのものの
 妥当性ではない。後者はオーナーが提案元の PR をマージした時点で承認済み（＝取り込み時の再承認は重複）。
-逆にベース不一致・判定不能・常時層の肥大化は**提案時点には存在しない情報**なので、スレッドでの承認では
+逆にベース不一致・判定不能・常時層の肥大化は**提案時点には存在しない情報**なので、提案元でのマージでは
 代替できず、ここで人間に回す。判定不能（`ベース:` の欠落）は「問題なし」ではないので保留側に倒す。
 
 #### 上りの認可（なぜ提案元の可視性で分けるか）
 
-「ユーザーが見ている」は ops-sync 側から検証できない。提案は consumer の main に置かれたただのファイルで、
-署名も承認記録も無い。**代わりの根拠は提案元 main への書き込み権**——private repo なら、main に提案が
-載った時点でその書き込みはオーナーのアクセス下で起きており、置かれたこと自体がスレッドに現れる。
+承認点は**オーナーが提案元で提案ファイルを含む PR を main へマージしたこと**（→ `docs/outbox-proposal.md`
+の完了条件）。collect が拾うのはその後なので、取り込み PR の自動マージは同じ変更の二度目の承認を省く
+自動化であって、承認そのものを省いてはいない。
 
-public repo にはこの前提が無い。誰でも fork して PR を出せるので、「main に載った」は
-オーナーが見たことを意味しない。よって**提案元が public なら種別によらず人間のレビューに回す**。
+ただしそれが承認たりうるのは、**main に載る内容の出所がオーナーに限られる**場合だけ。private repo は
+そう言えるが、**public repo は誰でも fork して PR を出せる**ので「main に載った」がオーナー由来を
+意味しない。よって**提案元が public なら種別によらず ops-sync 側でもレビューする**（＝承認は計2回。
+この2回目は冗長ではない）。
 
 これを外すと、任意の consumer の main に提案ファイルを1つ置くだけで、`shared/.github/workflows/` に
 任意の workflow を入れて `OPS_SYNC_TOKEN`（全 consumer に Contents:RW＋Workflows:RW）で全 consumer へ

@@ -7,8 +7,10 @@
 経路: 依頼元から `種別: task` を ops-sync へ出す（正本への直接 PR か `.ops-sync/outbox/` 提案。選び方は
 [`docs/outbox-proposal.md`](outbox-proposal.md)）→ ops-sync の `tasks/<owner>/<repo>/` → sync で
 対象リポジトリの `.ops-sync/tasks/` へ配布 → 対象リポジトリのセッションが実行 → `種別: task-done` で消化。
-途中に ops-sync 側の PR と同期 PR（対象）が挟まり、**オーナーが2回マージして初めて届く**＝届いている
-タスクは承認済みとみなしてよい。
+途中に**オーナーがマージする PR が必ず挟まる**ので、届いているタスクは承認済みとみなしてよい。
+どの PR を挟むかは経路で変わる（直接 PR なら ops-sync の PR、outbox 提案なら提案を載せた依頼元の PR。
+ops-sync の取り込み PR は private 発かつ機械確認を通れば自動マージされる。→ `docs/outbox-proposal.md`）。
+最後に対象リポジトリの同期 PR が入って手元に届く。
 
 ## 依頼する側（タスクを書くとき）
 
@@ -22,7 +24,9 @@
 
 依頼を出したら（経路と書式: [`docs/outbox-proposal.md`](outbox-proposal.md)）、**ユーザーに次を伝える**:
 
-1. 「ops-sync 側の PR → 対象リポジトリの同期 PR の順にマージされると届きます」と伝える（MUST）。
+1. **オーナーがマージする PR を経路に合わせて伝える**（MUST）。直接 PR なら「ops-sync の PR →
+   対象リポジトリの同期 PR の順にマージされると届きます」。outbox 提案なら「この PR →（ops-sync の
+   取り込み PR。public 発や保留になったときはこれもマージが要ります）→ 対象リポジトリの同期 PR」。
 2. 起票経路の完了条件を確認する（MUST）: 直接 PR は ops-sync の open PR URL、outbox は提案を含む open PR URLを示す。
 3. **対象リポジトリのセッションに貼るコピペ用の指示文**を示す（MUST。1つずつ・冒頭に1行の概要。
    Claude Code は最初の入力からセッションタイトルを生成するため）:
