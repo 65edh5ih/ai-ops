@@ -1,0 +1,101 @@
+name: Create or update PR (quiet)
+description: >-
+  Commit the working tree of a checkout to a branch and open (or reuse) a pull
+  request, WITHOUT echoing the changed file paths into the job log.
+
+  Why this exists: `peter-evans/create-pull-request` streams `git status` and
+  `git commit` output to the job log. ops-sync is public, so its run logs are
+  world-readable — and its cross-repo batches commit inside *private* consumers.
+  That published private file names (task-history fragment slugs, outbox
+  proposal names) in ops-sync's job log, which is the same leak class that
+  `docs/ci-logs.md` step A-6 forbids. The output of a `uses:` step cannot be
+  suppressed by the calling workflow, so the git work has to happen inside a
+  `run:` step whose output we redirect ourselves — which is what this action is.
+
+  Only for repositories whose contents must not reach the runner's log. For
+  commits against ops-sync itself (public either way) the upstream action is
+  fine and stays in use.
+inputs:
+  path:
+    description: Checkout directory to commit from. Its `origin` must already be push-capable.
+    required: true
+  repository:
+    description: "`owner/repo` that the checkout belongs to (used for the `gh` calls)."
+    required: true
+  base:
+    description: Base branch of the pull request.
+    required: false
+    default: main
+  branch:
+    description: Head branch to create or force-update.
+    required: true
+  commit-message:
+    description: Commit message.
+    required: true
+  title:
+    description: Pull request title (used only when creating a new PR).
+    required: true
+  body-path:
+    description: File holding the pull request body (used only when creating a new PR).
+    required: true
+  log-file:
+    description: >-
+      File the git/gh output is appended to. Point this at the detail log that
+      is published to the *subject* repository's `ci-logs`, never at anything
+      that lands in a public roll-up.
+    required: true
+  token:
+    description: "GitHub token with contents:write and pull-requests:write on the target repository."
+    required: true
+outputs:
+  pull-request-url:
+    description: URL of the created or reused pull request. Empty when there was nothing to commit.
+    value: ${{ steps.pr.outputs.pull-request-url }}
+runs:
+  using: composite
+  steps:
+    - id: pr
+      shell: bash
+      env:
+        SRC: ${{ inputs.path }}
+        REPO: ${{ inputs.repository }}
+        BASE: ${{ inputs.base }}
+        BRANCH: ${{ inputs.branch }}
+        MSG: ${{ inputs.commit-message }}
+        TITLE: ${{ inputs.title }}
+        BODY: ${{ inputs.body-path }}
+        LOG: ${{ inputs.log-file }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        set -uo pipefail
+        mkdir -p "$(dirname "$LOG")"
+        url=""
+        # ここから先の出力は**ジョブログに出さない**（この action の存在理由）。`{ }` はサブシェルでは
+        # 無いので、中で立てた url はブロックの外でも読める。中の `exit` はステップ全体を落とす。
+        {
+          cd "$SRC" || { echo "create-pr-quiet: no such checkout"; exit 1; }
+          git config user.name 'ops-sync[bot]'
+          git config user.email 'ops-sync@users.noreply.github.com'
+          git checkout -B "$BRANCH" || exit 1
+          git add -A
+          if git diff --cached --quiet; then
+            echo "create-pr-quiet: no changes; no PR"
+          else
+            git commit -q -m "$MSG" || exit 1
+            # ブランチは毎回このバッチが作り直す使い捨てなので force で上書きしてよい
+            # （前回の run が残したコミットに追従する必要が無い）。
+            git push -q --force origin "HEAD:refs/heads/$BRANCH" || exit 1
+            # 既に open な PR があれば作らずに再利用する（force-push で中身は更新済み）。
+            existing="$(gh pr list -R "$REPO" --head "$BRANCH" --base "$BASE" --state open --json url --jq '.[0].url // ""')"
+            if [ -n "$existing" ]; then
+              url="$existing"
+              echo "create-pr-quiet: updated existing PR"
+            else
+              # gh pr create は URL を stdout に出す。コマンド置換で拾うのでログには落ちない。
+              url="$(gh pr create -R "$REPO" --base "$BASE" --head "$BRANCH" --title "$TITLE" --body-file "$BODY")" || exit 1
+              echo "create-pr-quiet: created PR"
+            fi
+          fi
+        } >> "$LOG" 2>&1
+        # URL は「件数・repo 名・成否・PR URL まで」の公開可能な範囲（docs/ci-logs.md 手順A-6）。
+        printf 'pull-request-url=%s\n' "$url" >> "$GITHUB_OUTPUT"

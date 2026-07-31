@@ -445,6 +445,13 @@ for (const p of batch) {
 
 // ── PR タイトル・本文と outputs ──────────────────────────────────────────────
 const slug = branchSlug(batch[0].name);
+// cleanup ブランチ名は**提案ファイル名から復元できない形**にする。ブランチ名は ops-sync（public）の
+// ジョブログにそのまま出る（`uses:` ステップの with: は必ずログに出るうえ、`gh pr merge` も出す）ので、
+// slug をそのまま使うと提案元 consumer の提案名が世界公開の run ログに載る
+// （→ shared/docs/ci-logs.md 手順A-6）。バッチ先頭の提案名から決まる点は同じなので、
+// 「同じバッチを再処理すると同じブランチ＝open のままの PR を force-push で更新する」性質は保つ。
+// 取り込み（intake）側は public な ops-sync に立てるブランチで、提案内容自体が公開 PR になるため slug のまま。
+const cleanupSlug = hash12(batch[0].name);
 const titlePrefix = staleMismatch ? '[要確認: ベース不一致] ' : '';
 const prTitle = applied.length === 1
   ? `${titlePrefix}${applied[0].title}`
@@ -515,7 +522,7 @@ emitOutputs({
   rejected: String(rejected.length),
   deferred: String(deferred.length),
   branch: `ops-sync/intake-${slug}`,
-  cleanup_branch: `ops-sync/cleanup-${slug}`,
+  cleanup_branch: `ops-sync/cleanup-${cleanupSlug}`,
   pr_title: prTitle,
   cleanup_title: cleanupTitle,
   auto_merge: autoMerge ? 'true' : 'false',

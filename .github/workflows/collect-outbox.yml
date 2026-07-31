@@ -180,19 +180,24 @@ jobs:
             echo "::warning::intake PR の自動マージに失敗しました（PR は open のまま残します）: $PR_URL"
           fi
 
+      # 取り込み PR（上）と違い、こちらは **consumer のファイルを commit する**。
+      # peter-evans/create-pull-request は変更ファイル一覧をジョブログへ流すので、それだと提案の
+      # ファイル名が public な ops-sync の run ログに載る（→ docs/ci-logs.md 手順A-6）。
+      # 自前 action で git 操作の出力を詳細ログ（提案元 consumer 行き）へ逃がす。
       - name: Open cleanup PR to consumer (remove/reject processed proposals)
         id: cleanup-pr
         if: steps.collect.outputs.consumer_changed == 'true'
-        uses: peter-evans/create-pull-request@v8
+        uses: ./ops-sync/.github/actions/create-pr-quiet
         with:
           path: ${{ steps.collect.outputs.consumer_dir }}
-          token: ${{ secrets.OPS_SYNC_TOKEN }}
+          repository: ${{ steps.collect.outputs.consumer }}
           base: main
           branch: ${{ steps.collect.outputs.cleanup_branch }}
-          delete-branch: true
           commit-message: 'chore: ops-sync が処理した提案を outbox から整理'
           title: ${{ steps.collect.outputs.cleanup_title }}
           body-path: ${{ runner.temp }}/cleanup-body.md
+          log-file: /tmp/ci-logs/cleanup-pr.log
+          token: ${{ secrets.OPS_SYNC_TOKEN }}
 
       # cleanup をマージすると提案が outbox から消える＝オーナーが取り込み PR を close して却下する
       # 逃げ道が無くなる。なので**取り込みが実際に入った後**にだけ掃除する。掃除してよいのは4通り:
@@ -220,7 +225,8 @@ jobs:
         run: |
           # 失敗を握りつぶすと「提案は outbox に残っているのに run は緑」になり、次回以降も同じ提案が
           # 最古に居座り続ける。結果は output に残し、最後の判定ステップで run を失敗させる。
-          if gh pr merge --squash "$PR_URL"; then
+          # --delete-branch は create-pull-request の delete-branch: true の代わり（自前 PR 作成に移した分）。
+          if gh pr merge --squash --delete-branch "$PR_URL"; then
             echo "merged=true" >> "$GITHUB_OUTPUT"
           else
             echo "merged=false" >> "$GITHUB_OUTPUT"
