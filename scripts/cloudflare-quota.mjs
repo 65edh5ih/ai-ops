@@ -158,10 +158,13 @@ async function measurePages() {
   let lastFirstProject = null;
   let projectsComplete = false;
   while (projectPage <= 200) {
-    // **`per_page` は 25 まで**。100 を渡すと 400 `8000024: Invalid list options provided.` で拒否され、
-    // Pages 側の計測が丸ごと unknown に落ちる（API リファレンスに上限の記載は無く、実測で判明）。
-    // 下の deployments 呼び出しと同じ値に揃えてある——片方だけ変えると同じ罠に戻る。
-    const projects = await api(`/accounts/${accountId}/pages/projects?page=${projectPage}&per_page=25`);
+    // **`per_page` を渡さない**。この一覧は `per_page` を付けると値によらず 400
+    // `8000024: Invalid list options provided.` で拒否される（100 と 25 の両方で実測。API リファレンスは
+    // `page` / `per_page` をどちらも optional としか書いておらず、上限も拒否条件も書かれていない）。
+    // 拒否されると Pages 側の計測が丸ごと unknown に落ちるので、**docs に無い任意パラメータを足さない**。
+    // ページ送りはレスポンスの `result_info.total_pages` で行う。
+    const q = projectPage > 1 ? `?page=${projectPage}` : '';
+    const projects = await api(`/accounts/${accountId}/pages/projects${q}`);
     if (projects.status !== 200 || !projects.body?.success) {
       return { state: 'unknown', note: `pages projects list failed (status ${projects.status}${projects.errors ? ` — ${projects.errors}` : ''})` };
     }
@@ -176,8 +179,10 @@ async function measurePages() {
     }
     lastFirstProject = firstProject;
     names.push(...items.map((p) => p?.name).filter(Boolean));
+    // 完了判定は result_info を正とする。per_page を指定しない以上、1ページあたりの件数を
+    // こちら側で決め打ちできない（items.length と定数を比べる判定は使えない）。
     const totalPages = Number(projects.body?.result_info?.total_pages);
-    if ((Number.isFinite(totalPages) && projectPage >= totalPages) || items.length < 100) {
+    if (!Number.isFinite(totalPages) || projectPage >= totalPages) {
       projectsComplete = true;
       break;
     }
