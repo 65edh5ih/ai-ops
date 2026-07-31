@@ -80,6 +80,20 @@ runs:
           git add -A
           if git diff --cached --quiet; then
             echo "create-pr-quiet: no changes; no PR"
+            # **差分が消えたら、前の run が残した open な PR を閉じる**（MUST）。マージに失敗して PR が
+            # open のまま残り（各ワークフローは失敗を握って PR を残す）、その後べつの経路で同じ内容が
+            # main に入ると、次の run は無差分になってこの枝を通る。ここで何もしないと、実体の無い PR と
+            # ブランチが永久に残る——置き換え前の create-pull-request は delete-branch: true でこれを
+            # 閉じていたので、放置は挙動の後退になる。
+            stale="$(gh pr list -R "$REPO" --head "$BRANCH" --base "$BASE" --state open --json url --jq '.[0].url // ""')"
+            if [ -n "$stale" ]; then
+              # コメントは**対象の中身に触れない**一般文にする（PR は対象リポジトリ側だが、
+              # ここで組み立てる文字列を増やさない方が事故が起きにくい）。
+              gh pr close "$stale" -R "$REPO" --delete-branch \
+                --comment 'ops-sync のバッチ: 差分が無くなったため close します（同じ内容が別経路で main に入っています）。' \
+                && echo "create-pr-quiet: closed stale PR (diff disappeared)" \
+                || echo "create-pr-quiet: failed to close stale PR"
+            fi
           else
             git commit -q -m "$MSG" || exit 1
             # ブランチは毎回このバッチが作り直す使い捨てなので force で上書きしてよい
