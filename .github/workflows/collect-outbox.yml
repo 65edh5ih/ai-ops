@@ -72,9 +72,9 @@ jobs:
             git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${repo}.git" "consumers/${repo}"
           done < <(grep -vE '^[[:space:]]*(#|$)' ops-sync/consumers.txt)
 
-      # 自動マージの前提は「提案は提案元セッションでユーザーが見ている」だが、ops-sync 側から
-      # それは検証できない。代わりに提案元 main への書き込み権を使う——private なら main に載った
-      # 時点でオーナーのアクセス下にある。public にはその前提が無いので人間のレビューに回す。
+      # 提案内容の承認は、提案元でオーナーが提案ファイルを含む PR を main へマージした時点で済んでいる。
+      # ただしそれが承認たりうるのは main に載る内容の出所がオーナーに限られる場合だけで、public repo は
+      # 不特定の第三者が fork/PR で持ち込める。よって public 発は人間のレビューに回す。
       # **判定できなかった repo は public 側に入れる**（引けなかった run で関門が黙って消えないように）。
       - name: Determine which consumers are public
         id: visibility
@@ -159,7 +159,7 @@ jobs:
           title: ${{ steps.collect.outputs.pr_title }}
           body-path: ${{ runner.temp }}/pr-body.md
 
-      # 提案内容そのものの妥当性は提案元セッションでユーザーが見ている。ここで人間に見せる価値が
+      # 提案内容そのものの妥当性は提案元の PR をオーナーがマージした時点で承認済み。ここで人間に見せる価値が
       # あるのは、**提案が書かれた後に前提が変わった**（ベース不一致・判定不能）ことと、常時層の
       # 肥大化——どちらも提案時点では存在しない情報で、スレッドでの承認では代替できない。
       # その2つが無いと機械的に確認できたときだけ自動で入れる（判定は collect が行う）。
