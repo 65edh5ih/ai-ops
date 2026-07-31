@@ -1,0 +1,65 @@
+name: Deploy route reconcile
+
+# 逼迫信号から「いまどちらの経路が望ましいか」を決めて ci-logs に公開する。**切替は行わない**。
+#
+# **判断と実行を分けてある**。ここ（public な ops-sync）は Actions 分を消費しないので頻繁に回せるが、
+# **consumer にも Cloudflare にもアクセスしない**ので新しい資格情報を置かずに済む
+# （ops-sync-design.md「ops-sync に置く CF トークンは読み取り専用にする」を守るため。public 側に
+# 権限を集中させない）。実際の切替は consumer 側の workflow が自分のトークンで行う。
+#
+# 出力: ci-logs の `deploy-route/decision.json`（ops-sync は public なので consumer から認証なしで読める）。
+# **信号が古い・壊れているときは推奨を出さない**（推測で経路を動かすと、枠を焼くか配信を止めるかになる）。
+
+on:
+  schedule:
+    # 信号は6時間ごとに更新されるので、その少し後を狙う。頻度を上げても判断材料は増えない。
+    - cron: '23 1,7,13,19 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write        # publish-ci-logs が ci-logs ブランチへ結果を push するのに必要
+
+concurrency:
+  group: deploy-route-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 信号は ci-logs ブランチにあるので、そこだけ取り出す（作業ツリーには入れない）。
+      - name: Read quota signals
+        id: signals
+        run: |
+          set -uo pipefail
+          git fetch origin ci-logs --depth=1 2>/dev/null || true
+          {
+            echo 'actions<<SIGEOF'
+            git show origin/ci-logs:quota/actions/actions.json 2>/dev/null || echo ''
+            echo 'SIGEOF'
+            echo 'cloudflare<<SIGEOF'
+            git show origin/ci-logs:quota/cloudflare/cloudflare.json 2>/dev/null || echo ''
+            echo 'SIGEOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Decide
+        env:
+          ACTIONS_SIGNAL: ${{ steps.signals.outputs.actions }}
+          CF_SIGNAL: ${{ steps.signals.outputs.cloudflare }}
+          OUT_DIR: out
+        run: |
+          set -uo pipefail
+          mkdir -p logs/ci/scripts
+          node scripts/deploy-route-reconcile.mjs 2>&1 | tee logs/ci/scripts/deploy-route-reconcile.log
+          cp out/decision.json logs/ci/decision.json
+
+      - name: Publish logs to ci-logs branch
+        if: always()
+        uses: ./.github/actions/publish-ci-logs
+        with:
+          source-dir: logs/ci
+          dest: deploy-route/latest
+          commit-message: "ci(deploy-route): reconcile run ${{ github.run_id }}"
+          token: ${{ github.token }}
