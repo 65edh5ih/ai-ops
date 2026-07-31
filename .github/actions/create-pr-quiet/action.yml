@@ -89,6 +89,11 @@ runs:
             existing="$(gh pr list -R "$REPO" --head "$BRANCH" --base "$BASE" --state open --json url --jq '.[0].url // ""')"
             if [ -n "$existing" ]; then
               url="$existing"
+              # **タイトルと本文も貼り直す**（MUST）。同じブランチを再利用するのは「前回の PR がまだ
+              # open で、今回その内容が増えた」ときで、差分だけ force-push して本文を据え置くと
+              # PR が実際の変更より少なく見える（例: cleanup PR に、後から増えた削除・差し戻しの
+              # 一覧と却下理由が載らない）。置き換え前の create-pull-request は毎回更新していた。
+              gh pr edit "$existing" -R "$REPO" --title "$TITLE" --body-file "$BODY" || exit 1
               echo "create-pr-quiet: updated existing PR"
             else
               # gh pr create は URL を stdout に出す。コマンド置換で拾うのでログには落ちない。
