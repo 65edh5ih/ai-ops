@@ -63,6 +63,10 @@ jobs:
         uses: ./.github/actions/publish-ci-logs
         with:
           source-dir: logs/ci
-          dest: deploy-route/latest
+          # **`<name>/latest` にしない**（他の slice と違う点）。この slice は人が読むログではなく
+          # **consumer の worker が URL 直打ちで取りに来る配布物**で、その URL は設計 doc・
+          # workflow 冒頭・スクリプトが揃って `deploy-route/decision.json` と書いている。
+          # publish 先だけ `latest/` にすると、正本パスが 404 のまま誰も気づかない。
+          dest: deploy-route
           commit-message: "ci(deploy-route): reconcile run ${{ github.run_id }}"
           token: ${{ github.token }}
