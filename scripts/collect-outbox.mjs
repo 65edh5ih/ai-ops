@@ -138,16 +138,11 @@ function dirs(p) {
 const proposals = [];
 for (const owner of dirs(consumersRoot)) {
   for (const repo of dirs(path.join(consumersRoot, owner))) {
-    // 移行期は旧 .ai-ops/outbox も拾う。配布 doc が新パスに切り替わる前に始まったセッションが
-    // 旧パスへ提案を置くことがあり、片方しか見ないと取りこぼして提案が永久に処理されない。
-    // 全 consumer から .ai-ops/ が消えたら、走査を新パスだけに戻してよい。
-    for (const dir of ['.ops-sync', '.ai-ops']) {
-      const outbox = path.join(consumersRoot, owner, repo, dir, 'outbox');
-      if (!existsSync(outbox)) continue;
-      for (const e of readdirSync(outbox, { withFileTypes: true })) {
-        if (!e.isFile() || !e.name.endsWith('.md')) continue;
-        proposals.push({ repo: `${owner}/${repo}`, file: path.join(outbox, e.name), name: e.name, outboxDir: dir });
-      }
+    const outbox = path.join(consumersRoot, owner, repo, '.ops-sync', 'outbox');
+    if (!existsSync(outbox)) continue;
+    for (const e of readdirSync(outbox, { withFileTypes: true })) {
+      if (!e.isFile() || !e.name.endsWith('.md')) continue;
+      proposals.push({ repo: `${owner}/${repo}`, file: path.join(outbox, e.name), name: e.name });
     }
   }
 }
@@ -162,9 +157,7 @@ proposals.sort((a, b) => a.name.localeCompare(b.name));
 const consumerRepo = proposals[0].repo;
 const batch = proposals.filter((p) => p.repo === consumerRepo);
 const consumerDir = path.join(consumersRoot, consumerRepo);
-// 差し戻し先は、その提案が置かれていた outbox と同じディレクトリに合わせる（旧パスの提案を
-// 新パスへ差し戻すと、提案者が自分の置いた場所を見ても見つけられない）。
-const rejectedDir = path.join(consumerDir, batch[0].outboxDir, 'outbox', 'rejected');
+const rejectedDir = path.join(consumerDir, '.ops-sync', 'outbox', 'rejected');
 
 // 処理対象の consumer が決まった時点で先に出しておく。以降このスクリプトの出力には提案のファイル名・
 // 却下理由（＝提案元 consumer の中身）が混ざるので、**途中で落ちても**ワークフローが詳細ログの

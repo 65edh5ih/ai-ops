@@ -8,12 +8,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const START = '<!-- OPS-SYNC:COMMON START — このブロックは ops-sync が自動同期します。手で編集しないこと -->';
 const END = '<!-- OPS-SYNC:COMMON END -->';
 
-// 旧マーカー（リポジトリ名が ai-ops だった頃）。consumer の AGENTS.md にはまだこちらが入っているので、
-// 見つけたら新マーカーごと置き換える＝1回の同期で移行する。これが無いと新マーカーが見つからず
-// 「末尾に追記」の経路へ落ち、全 consumer で共通ブロックが二重になる。
-// 全 consumer が新マーカーへ移ったら、この2定数と findRegion の LEGACY 分岐は削除してよい。
-const LEGACY_START = '<!-- AI-OPS:COMMON START — このブロックは ai-ops が自動同期します。手で編集しないこと -->';
-const LEGACY_END = '<!-- AI-OPS:COMMON END -->';
+// 旧マーカー（リポジトリ名が ai-ops だった頃）。移行は全 consumer で完了したので**もう変換しない**が、
+// 検出だけ残す: 旧マーカーだけの AGENTS.md を黙って処理すると、新マーカーが見つからず追記
+// フォールバックへ落ちて共通ブロックが二重になる。壊すより失敗させて人に掃除させる。
+const LEGACY_MARKER = 'AI-OPS:COMMON';
 
 const [, , commonPath, targetPath] = process.argv;
 if (!commonPath || !targetPath) {
@@ -27,45 +25,34 @@ const block = `${START}\n${body}\n${END}`;
 let target = '';
 try { target = readFileSync(targetPath, 'utf8'); } catch { target = ''; }
 
-// 新マーカーを優先し、無ければ旧マーカーの区間を拾う（移行時に1回だけ効く）。
 function findRegion(text) {
-  for (const [s, e] of [[START, END], [LEGACY_START, LEGACY_END]]) {
-    const i = text.indexOf(s);
-    const j = text.indexOf(e);
-    if (i !== -1 && j !== -1 && j > i) return { from: i, to: j + e.length };
-  }
+  const i = text.indexOf(START);
+  const j = text.indexOf(END);
+  if (i !== -1 && j !== -1 && j > i) return { from: i, to: j + END.length };
   return null;
 }
 
 // マーカーの状態を**区間を選ぶ前に**全数検査する。壊れた状態のまま追記フォールバックに落ちる／
 // 健全な側の区間だけ差し替えると、壊れたマーカーと古い本文が残ったまま共通ブロックがもう1つ増え、
 // 全エージェントが読む AGENTS.md に同じ規約が二重に載る。黙って直せないので失敗させる。
-// 健全と認めるのは「新旧どちらか一方の組が start→end の順にちょうど1組」か「どちらも皆無」だけ。
-// （移行中は旧の組だけ、移行後は新の組だけ。新旧が同時に揃っている状態も規約の二重掲載なので弾く。）
+// 健全と認めるのは「現行の組が start→end の順にちょうど1組」か「皆無」（＝初回配線）だけ。
 function markerProblems(text) {
   const count = (needle) => text.split(needle).length - 1;
   const problems = [];
-  const sets = [
-    ['OPS-SYNC:COMMON', START, END],
-    ['AI-OPS:COMMON (legacy)', LEGACY_START, LEGACY_END],
-  ];
-  let complete = 0;
-  for (const [label, s, e] of sets) {
-    const ns = count(s);
-    const ne = count(e);
-    if (ns === 0 && ne === 0) continue;
-    if (ns > 1 || ne > 1) {
-      problems.push(`${label}: duplicated markers (start x${ns}, end x${ne})`);
-    } else if (ns !== 1 || ne !== 1) {
-      problems.push(`${label}: unpaired marker (start x${ns}, end x${ne})`);
-    } else if (text.indexOf(e) < text.indexOf(s)) {
-      problems.push(`${label}: end marker appears before start marker`);
-    } else {
-      complete += 1;
-    }
+  const ns = count(START);
+  const ne = count(END);
+  if (ns > 1 || ne > 1) {
+    problems.push(`OPS-SYNC:COMMON: duplicated markers (start x${ns}, end x${ne})`);
+  } else if (ns !== ne) {
+    problems.push(`OPS-SYNC:COMMON: unpaired marker (start x${ns}, end x${ne})`);
+  } else if (ns === 1 && text.indexOf(END) < text.indexOf(START)) {
+    problems.push('OPS-SYNC:COMMON: end marker appears before start marker');
   }
-  if (complete > 1) {
-    problems.push('both the current and legacy marker blocks are present (rules would be duplicated)');
+  // 旧マーカーはもう変換しない。残っていたら追記フォールバックで二重掲載になるので弾く。
+  if (count(LEGACY_MARKER) > 0) {
+    problems.push(
+      `${LEGACY_MARKER}: legacy markers are no longer migrated; remove them (keep only the OPS-SYNC:COMMON pair)`,
+    );
   }
   return problems;
 }
