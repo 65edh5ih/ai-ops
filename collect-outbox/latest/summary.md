@@ -1,0 +1,12 @@
+# Collect outbox proposals
+- Run: 30827208311
+- Triggered by: schedule
+- Ref: 8e1060093d5bae8c52f274c34e768d07264d1799
+- Started: 2026-08-03T15:22:58Z
+- Result: no proposals
+- Found: 
+- Type: 
+- Consumer: 
+- Applied/Rejected/Deferred: //
+- Detail log (when a consumer was processed): `collect-outbox/latest` on that consumer's `ci-logs` branch
+- Finished: 2026-08-03T15:23:05Z
