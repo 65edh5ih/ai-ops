@@ -207,7 +207,11 @@ const isPublicSource = (repo) => !visibilityChecked || publicConsumers.has(repo)
 
 // 不正な提案を outbox/rejected/ へ移し、先頭にエラーノートを付ける
 function reject(p, reason, extra) {
-  const original = readFileSync(p.file, 'utf8');
+  // **バイトのまま差し戻す**（MUST NOT: utf8 でデコードする）。`shared-file` の本文は非 UTF-8 を
+  // 含みうるので、utf8 で読むと U+FFFD に化けたものが consumer の main に書き戻る。却下は
+  // 「ヘッダを直して出し直す」ための経路なので、ここでバイトが変わると同じ内容を再提出できない
+  // （提案者は過去リビジョンから復元する羽目になる）。→ shared/docs/ops-sync-design.md の書き込み不変条件
+  const original = readFileSync(p.file);
   const note = [
     '> [!CAUTION]',
     `> **ops-sync の collect が差し戻した提案です**（${new Date().toISOString().slice(0, 10)}）。このディレクトリのファイルは処理されません。`,
@@ -218,7 +222,7 @@ function reject(p, reason, extra) {
     '',
   ].filter((l) => l !== null).join('\n');
   mkdirSync(rejectedDir, { recursive: true });
-  writeFileSync(path.join(rejectedDir, p.name), note + original);
+  writeFileSync(path.join(rejectedDir, p.name), Buffer.concat([Buffer.from(note, 'utf8'), original]));
   rmSync(p.file);
   rejected.push({ name: p.name, reason });
   console.error(`[reject] ${consumerRepo}/${p.name}: ${reason}`);

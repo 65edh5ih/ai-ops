@@ -136,10 +136,15 @@ runs:
         # Resolve the TTL to seconds. retention-minutes wins when it is a positive integer;
         # anything else (empty, or garbage) falls back to the day-based value so a typo cannot
         # silently shorten the TTL to zero and wipe a slice the caller is still reading.
-        RETENTION_SECONDS="$(( RETENTION_DAYS * 86400 ))"
+        #
+        # Force base 10 (`10#`): the digit-only checks above accept zero-padded values such as
+        # '08', which bash arithmetic would read as octal and abort with "value too great for
+        # base", failing the action instead of applying the documented TTL. Callers writing
+        # minutes as '08' is entirely reasonable, so parse rather than reject.
+        RETENTION_SECONDS="$(( 10#$RETENTION_DAYS * 86400 ))"
         case "$RETENTION_MINUTES" in
           ''|*[!0-9]*) : ;;
-          *) [ "$RETENTION_MINUTES" -gt 0 ] && RETENTION_SECONDS="$(( RETENTION_MINUTES * 60 ))" ;;
+          *) [ "$(( 10#$RETENTION_MINUTES ))" -gt 0 ] && RETENTION_SECONDS="$(( 10#$RETENTION_MINUTES * 60 ))" ;;
         esac
         echo "publish-ephemeral: retention=${RETENTION_SECONDS}s"
 
