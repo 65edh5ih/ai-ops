@@ -21,11 +21,6 @@ import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, rmSync
 import path from 'node:path';
 
 const MANIFEST = '.ops-sync/sync-manifest.txt';
-// 旧 manifest（リポジトリ名が ai-ops だった頃）。consumer にはまだこちらが残っているので、
-// 削除判定では新旧の和を見て、旧 manifest ファイル自体も撤去する（manifest は manifest に載らないため
-// 差分削除では消えない）。旧配置の .ai-ops/tasks/** は旧 manifest に載っているので自動で消える。
-// 全 consumer から .ai-ops/ が消えたら、この定数と後方互換の分岐は削除してよい。
-const LEGACY_MANIFEST = '.ai-ops/sync-manifest.txt';
 
 // skill の正本ディレクトリと、そこから導出する各エージェントのミラー先
 // （.agents=Antigravity / .qwen=Qwen Code / .cline=Cline。いずれも <root>/skills/<name>/SKILL.md を
@@ -111,12 +106,9 @@ for (const [rel, src] of desired) {
 }
 
 // 削除: (前回 manifest ∪ sync-deletions.txt) のうち、今回の配布物に無い既存ファイル
-const oldManifest = [
-  ...readList(path.join(targetRoot, MANIFEST)),
-  ...readList(path.join(targetRoot, LEGACY_MANIFEST)), // 移行: 旧 manifest 記載分も削除対象に含める
-];
+const oldManifest = readList(path.join(targetRoot, MANIFEST));
 const tombstones = readList(path.join(aiOpsRoot, 'sync-deletions.txt'));
-for (const rel of new Set([...oldManifest, ...tombstones, LEGACY_MANIFEST])) {
+for (const rel of new Set([...oldManifest, ...tombstones])) {
   const norm = rel.split(path.sep).join('/');
   if (desired.has(norm) || !safeRel(norm)) continue;
   const dst = path.join(targetRoot, norm);
