@@ -57,6 +57,8 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 | `.github/workflows/actions-quota.yml` | （信号）cron（6時間ごと）で上記を実行し `ci-logs` の `quota/actions/actions.json` へ publish。エージェントが private repo で workflow を回してよいかの判断に使う（手順: `shared/docs/actions-quota.md`） |
 | `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から未 resolve の Codex レビュースレッドを集め、全体一覧＋リポジトリごとのスライスに落とす |
 | `.github/workflows/codex-review-inbox.yml` | （信号）cron（毎時）＋手動で上記を実行し、全体一覧を private の `.ops-sync/codex-review-inbox-all.md`、private consumer の自分の分を `.ops-sync/codex-review-inbox.md` へ push（変化があるときだけ）。public repo は全体一覧だけ |
+| `scripts/deploy-route-reconcile.mjs` | （信号）GitHub と CF の枠 state から「どちらの経路でデプロイすべきか」を決め、`decision.json` に落とす（切替そのものは行わない） |
+| `.github/workflows/deploy-route-reconcile.yml` | （信号）cron（6時間ごと）＋手動で上記を実行し `ci-logs` の `deploy-route/decision.json` へ publish。consumer 側がこの URL を読んで経路を合わせる（`<name>/latest` にしないのは、consumer が URL 直打ちで取りに来る配布物のため） |
 | `scripts/cloudflare-quota.mjs` | （信号）CF の月枠（Pages のビルド回数・Workers Builds の分数）を測り、使用率と**直近レートによる月末予測**の両方で band を出す |
 | `.github/workflows/cloudflare-quota.yml` | （信号）cron（6時間ごと）で上記を実行し `ci-logs` の `quota/cloudflare/cloudflare.json` へ publish。GitHub 枠の逼迫時に「CF へ退避してよいか」の判断に使う |
 

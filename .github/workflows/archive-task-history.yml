@@ -22,6 +22,15 @@ on:
 env:
   MERGE_MODE: direct
 
+# **run を直列化する**（collect-outbox と同じ）。この workflow は対象リポジトリごとに固定ブランチ
+# `ops-sync/archive-task-history` を使い、無差分なら同じ head の open PR を close して枝も消す。
+# schedule と workflow_dispatch が重なると、片方が「自分のスナップショットには差分が無い」と判断した
+# 時点で、もう片方が force-push した有効な PR を close してしまう（close の判断材料は head の中身では
+# なく自分の差分なので、後から見分けられない）。
+concurrency:
+  group: archive-task-history
+  cancel-in-progress: false
+
 jobs:
   prepare:
     runs-on: ubuntu-latest

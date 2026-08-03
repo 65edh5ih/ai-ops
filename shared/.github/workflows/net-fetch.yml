@@ -318,11 +318,15 @@ jobs:
           cutoff="$(date -u -d "-${RUN_RETENTION_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)"
           echo "cutoff=${cutoff} (これより古い completed かつ success の run を削除)"
 
-          # status=success は「completed かつ conclusion=success」を意味する（実行中は含まれない）。
-          # それでも念のため自分自身の run_id は除外する（削除対象に自分が混ざる事故の予防）。
+          # **`status` で絞らない**（MUST NOT）。`status` を付けた run 検索はサーバ側で 1,000 件に
+          # 打ち切られ、`--paginate` でもその先へ進めない。保持期間内に成功 run が 1,000 件を超えると
+          # 新しい 1,000 件だけが返り、それより古い run は cutoff の判定にすら乗らず**公開のまま
+          # 残り続ける**（この掃除の目的そのものが達成できない）。絞り込みは jq 側＝クライアントで行う。
+          # conclusion=success だけを対象にするのは従来どおり（実行中・失敗 run は消さない）。
+          # 自分自身の run_id は念のため除外する（削除対象に自分が混ざる事故の予防）。
           ids="$(gh api --paginate \
-            "repos/${REPO}/actions/workflows/net-fetch.yml/runs?status=success&per_page=100" \
-            --jq ".workflow_runs[] | select(.created_at < \"${cutoff}\") | .id" 2>/dev/null || true)"
+            "repos/${REPO}/actions/workflows/net-fetch.yml/runs?per_page=100" \
+            --jq ".workflow_runs[] | select(.status == \"completed\" and .conclusion == \"success\" and .created_at < \"${cutoff}\") | .id" 2>/dev/null || true)"
 
           if [ -z "$ids" ]; then
             echo "削除対象なし。"
