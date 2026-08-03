@@ -13,6 +13,13 @@
 //     1ページ（50件）で読み切れなかった PR** は「取得失敗」行として残す（黙って短い一覧を出すと、
 //     指摘が消えたのか読めなかったのか区別できず fail-open になる）。workflow はこの件数で run を
 //     失敗させるので、読み残しは緑にならない。
+//   - **マージされずクローズされた PR は在庫に載せない**。その変更は `main` に入っていないので直す対象が
+//     無く、載せると「理由を返信して resolve」という実コストだけが必ず発生する（消化プロトコルは
+//     全件を決着させることを要求する）。放棄された PR は増え続けるため、載せ続けると表が死に行で埋まって
+//     読まれなくなる——それがこの一覧の最悪の壊れ方。ただし**黙って消しはしない**: 直近スキャンで
+//     見つけた分だけ件数を注記に出す（放棄された PR の指摘が `main` にも当てはまることがあり、人が
+//     気づく余地を残す）。注記は**持ち越しの対象外**で、窓から外れれば消える（＝単調増加しない）。
+//     reopen されれば updatedAt が動くので直近スキャンが拾い直す。
 //
 // 入力（環境変数）:
 //   CRI_TOKEN          GitHub トークン（対象リポジトリの Pull requests: read が要る）
@@ -166,6 +173,7 @@ function daysAgo(iso) {
 }
 
 const findings = [];
+const abandoned = []; // マージされずクローズされた PR の未 resolve（在庫の対象外・注記だけ出す）
 const failures = [];
 const truncated = [];
 const seenPrs = new Set(); // "owner/repo#number" — この run で実際に確認できた PR
@@ -184,10 +192,24 @@ function loadCarriedPrs(path) {
   return [...out.values()];
 }
 
-// 1つの PR ノードから未 resolve な Codex 指摘を取り出す
-function collectFromPr(repo, pr) {
+// 1つの PR ノードから未 resolve な Codex 指摘を取り出す。
+// viaCarry: 持ち越し（前回の一覧に載っていたので名指しで再確認した）経由かどうか。
+function collectFromPr(repo, pr, viaCarry = false) {
   if (!pr) return 0;
   seenPrs.add(`${repo}#${pr.number}`);
+  // マージされずクローズされた PR は在庫に載せない（→ 冒頭「設計の要点」）。
+  // 注記に出すのは**直近スキャンで見つけた分だけ**。持ち越し経由のものを注記に出すと、注記のリンクが
+  // 次回の持ち越し入力になって永久に残る（在庫から外した意味が無くなる）。
+  if (!pr.merged && pr.state === 'CLOSED') {
+    if (viaCarry) return 0;
+    // 読み切れなかったスレッドも「取得失敗」にしない: 対象外の PR を読み残しても直す先が無く、
+    // run を赤くしても誰も動けない（読み残しで赤くするのは在庫に載るクラスだけでよい）。
+    const count = (pr.reviewThreads?.nodes || []).filter(
+      (th) => th && !th.isResolved && th.comments?.nodes?.[0]?.author?.login === bot,
+    ).length;
+    if (count) abandoned.push({ repo, pr: pr.number, url: pr.url, count });
+    return 0;
+  }
   // レビュースレッドが1ページ（50件）に収まらない PR は、2ページ目以降を**見ていない**。
   // 注記だけ出して緑で流すと「指摘ゼロ」と「読み切れていない」が区別できず、この一覧が防ぐはずの
   // fail-open そのものになる（workflow はこの failures の件数で run を失敗させる）。
@@ -279,7 +301,7 @@ for (const { repo, number } of carried) {
     continue;
   }
   carriedChecked++;
-  carriedFound += collectFromPr(repo, data.pullRequest);
+  carriedFound += collectFromPr(repo, data.pullRequest, true);
 }
 if (carriedChecked || carried.length) {
   console.log(`carried_over prs_rechecked=${carriedChecked} open_findings=${carriedFound}`);
@@ -297,6 +319,7 @@ const bySeverity = (a, b) =>
   a.url.localeCompare(b.url);
 findings.sort(bySeverity);
 failures.sort((a, b) => a.repo.localeCompare(b.repo));
+abandoned.sort((a, b) => a.repo.localeCompare(b.repo) || a.pr - b.pr);
 
 const STAMP = '<!-- generated:PLACEHOLDER -->';
 const esc = (s) => String(s).replace(/\|/g, '\\|');
@@ -315,6 +338,7 @@ function headerLines(scope) {
     '3. 次回実行でこの一覧から消える',
     '',
     '対応しない判断をした場合も、理由を返信してから resolve する（放置＝この一覧に残り続ける）。',
+    'ただし**マージされずクローズされた PR の指摘は対象外**（その変更は `main` に入っていないので直す先が無い）。',
     '',
   ];
 }
@@ -343,6 +367,27 @@ function failureLines(items) {
     '| 対象 | 理由 |',
     '|---|---|',
     ...items.map((f) => `| \`${f.repo}\` | ${esc(f.reason)} |`),
+    '',
+  ];
+}
+
+// マージされずクローズされた PR の未 resolve。**在庫（表）には載せず、ここで件数だけ知らせる**。
+// 直す対象が `main` に無いので resolve 不要だが、同じ問題が `main` にも当てはまることがあるため、
+// 黙って消さずに人が気づける形で残す（→ 冒頭「設計の要点」）。
+function abandonedLines(items) {
+  if (!items.length) return [];
+  const total = items.reduce((n, a) => n + a.count, 0);
+  return [
+    '## ⚪ 対象外: クローズ済み（未マージ）PR',
+    '',
+    `マージされずクローズされた PR に未 resolve の指摘が **${total} 件**残っている。その変更は \`main\` に` +
+      '入っていないので**上の在庫の対象外**（resolve しなくてよい）。',
+    '同じ問題が `main` にも当てはまるときだけ、現在の正本を見たうえで別途拾う。',
+    '',
+    ...items.map((a) => `- \`${a.repo.split('/')[1]}\` [#${a.pr}](${a.url}) — ${a.count}件`),
+    '',
+    `直近 ${lookbackDays} 日に更新された PR から拾った分だけを載せる（持ち越しの対象外なので、` +
+      '窓から外れれば消える。reopen されれば直近スキャンが拾い直す）。',
     '',
   ];
 }
@@ -414,6 +459,7 @@ if (findings.length === 0) {
     all.push(...tableLines(mine));
   }
 }
+all.push(...abandonedLines(abandoned));
 all.push(
   ...footerLines([
     'private の対象リポジトリには**そのリポジトリの分だけ**を抜き出した ' +
@@ -440,14 +486,15 @@ for (const repo of sliceRepos) {
   } else {
     lines.push(...tableLines(mine));
   }
+  lines.push(...abandonedLines(abandoned.filter((a) => a.repo === repo)));
   lines.push(...footerLines([`これは \`${repo}\` の分だけを抜き出したもの。全リポジトリ分の一覧は別にある。`, '']));
   writeIfChanged(join(clonesDir, repo, '.ops-sync', 'codex-review-inbox.md'), lines);
 }
 
 console.log(
   `summary repos=${repos.length} slice_repos=${sliceRepos.length} failures=${failures.length} open_findings=${findings.length} ` +
-    `merged_unresolved=${mergedCount} files_changed=${filesChanged} lookback_days=${lookbackDays} ` +
-    `ratelimit_remaining=${rate?.remaining ?? '?'}`,
+    `merged_unresolved=${mergedCount} closed_excluded=${abandoned.reduce((n, a) => n + a.count, 0)} ` +
+    `files_changed=${filesChanged} lookback_days=${lookbackDays} ratelimit_remaining=${rate?.remaining ?? '?'}`,
 );
 
 setOutput('open_findings', String(findings.length));

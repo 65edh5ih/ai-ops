@@ -169,6 +169,8 @@ consumer 側のセットアップは**不要**（workflow・Secret とも置か�
   `.ops-sync/codex-review-inbox.md`**（そのリポジトリの分だけ）に書き出す。public の ops-sync / ops-runner は
   PR 必須の `main` へ直接 push せず、走査結果を全体一覧だけに載せる。
   **一覧に載る＝未対応**で、直してスレッドを resolve すれば次回実行で消える（別途の管理表は無い）。
+  **マージされずクローズされた PR の指摘は在庫に載せない**（`main` に入っていないので直す先が無い）。
+  黙って消さずに件数だけ末尾の注記に出す。
   メール通知を1件ずつ辿る代わりにこのファイルを見る。新しい secret は不要（`OPS_SYNC_TOKEN` の
   Pull requests 権限で読む）。仕組みと置き場の理由は
   `shared/docs/ops-sync-design.md`「Codex レビューの取りこぼし対策」。
