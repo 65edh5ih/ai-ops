@@ -1,0 +1,3 @@
+cloudflare-quota: state=ok note=measured from pages deployments and workers builds for the current month
+  pages_builds: ok (within allowance and projected to stay within it)
+  workers_build_minutes: ok (within allowance and projected to stay within it)

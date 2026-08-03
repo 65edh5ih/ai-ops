@@ -1,0 +1,18 @@
+Switched to a new branch 'ops-sync/archive-task-history'
+M	docs/AI_TASK_HISTORY.md
+D	docs/history-inbox/2026-07-31T024137Z-approval-point-propagation-22fe5b687cbc.md
+D	docs/history-inbox/2026-07-31T024144Z-job-log-leak-create-pr-3204029e375c.md
+D	docs/history-inbox/2026-07-31T030017Z-archive-dispatch-branch-merge-14bd9443164a.md
+D	docs/history-inbox/2026-07-31T065302Z-collect-outbox-checkout-ref-b21e86e9fe86.md
+D	docs/history-inbox/2026-07-31T065926Z-design-doc-present-tense-7c6f4bb3a738.md
+D	docs/history-inbox/2026-07-31T115458Z-shared-file-verbatim-write-1421f4a78440.md
+D	docs/history-inbox/2026-07-31T125506Z-gha-trigger-ui-quota-enabling-6e0dfad5ed6b.md
+D	docs/history-inbox/2026-07-31T130819Z-deploy-route-decision-736facbba60b.md
+D	docs/history-inbox/2026-07-31T131443Z-cf-pages-per-page-ebce8416687f.md
+D	docs/history-inbox/2026-07-31T131648Z-gha-skill-trigger-3931e5a1f4a2.md
+D	docs/history-inbox/2026-07-31T133905Z-cf-pages-pagination-fail-closed-31bc391e447f.md
+remote: 
+remote: Create a pull request for 'ops-sync/archive-task-history' on GitHub by visiting:        
+remote:      https://github.com/65edh5ih/ops-sync/pull/new/ops-sync/archive-task-history        
+remote: 
+create-pr-quiet: created PR

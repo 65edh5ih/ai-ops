@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-08-03T10:52:30.904Z",
+  "usable": true,
+  "signals": {
+    "actions": {
+      "state": "ok",
+      "age_hours": 0.74
+    },
+    "cloudflare": {
+      "pages_builds": "ok",
+      "workers_build_minutes": "ok",
+      "age_hours": 0.43
+    }
+  },
+  "targets": {
+    "nikki-san/blog": {
+      "repo": "65edh5ih/nikki-san",
+      "policy_var": "BLOG_DEPLOY_POLICY",
+      "route_var": "BLOG_DEPLOY_ROUTE",
+      "route": "github",
+      "why": "Actions 枠に余裕あり"
+    },
+    "nikki-san/admin": {
+      "repo": "65edh5ih/nikki-san",
+      "policy_var": "ADMIN_DEPLOY_POLICY",
+      "route_var": "ADMIN_DEPLOY_ROUTE",
+      "route": "github",
+      "why": "Actions 枠に余裕あり"
+    },
+    "private/workers": {
+      "repo": "65edh5ih/private",
+      "policy_var": "WORKERS_DEPLOY_POLICY",
+      "route_var": "WORKERS_DEPLOY_ROUTE",
+      "route": "github",
+      "why": "Actions 枠に余裕あり"
+    }
+  }
+}

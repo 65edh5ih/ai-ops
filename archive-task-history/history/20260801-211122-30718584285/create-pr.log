@@ -1,0 +1,10 @@
+Switched to a new branch 'ops-sync/archive-task-history'
+M	docs/AI_TASK_HISTORY.md
+M	docs/history-archive/2026.md
+D	docs/history-inbox/2026-07-31T214925Z-cfq-empty-page-validation-9322154905a4.md
+D	docs/history-inbox/2026-08-01T131058Z-decision-canonical-path-6561ea3d5adc.md
+remote: 
+remote: Create a pull request for 'ops-sync/archive-task-history' on GitHub by visiting:        
+remote:      https://github.com/65edh5ih/ops-sync/pull/new/ops-sync/archive-task-history        
+remote: 
+create-pr-quiet: created PR
