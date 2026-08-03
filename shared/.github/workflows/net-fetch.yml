@@ -324,9 +324,23 @@ jobs:
           # 残り続ける**（この掃除の目的そのものが達成できない）。絞り込みは jq 側＝クライアントで行う。
           # conclusion=success だけを対象にするのは従来どおり（実行中・失敗 run は消さない）。
           # 自分自身の run_id は念のため除外する（削除対象に自分が混ざる事故の予防）。
-          ids="$(gh api --paginate \
+          # **列挙の失敗を握りつぶさない**（MUST NOT: `2>/dev/null || true` で緑のまま進む）。API 障害・
+          # レート制限・権限不足で一覧が取れなかったとき、それを「削除対象なし」と同じ扱いにすると、
+          # 取得 URL を含む古い public run が**警告も無しに残り続ける**（この掃除が守るはずのものが
+          # 静かに失われる）。ここは掃除の付随処理なので run 自体は落とさず、warning で可視化する。
+          # **代入を `if` の条件に置く**（MUST）。GitHub Actions の既定シェルは `bash -e` なので、
+          # `set -uo pipefail` を書いても errexit は消えない——素の代入にすると `gh api` の失敗で
+          # ステップがその場で終わり、下の `rc=$?` にも warning にも到達せず run 全体が赤くなる。
+          # 条件式の中なら errexit は発動しない。
+          # 標準エラーは捨てる: 本文が URL を含みうるうえ、ここは public のジョブログに落ちる。
+          if ids="$(gh api --paginate \
             "repos/${REPO}/actions/workflows/net-fetch.yml/runs?per_page=100" \
-            --jq ".workflow_runs[] | select(.status == \"completed\" and .conclusion == \"success\" and .created_at < \"${cutoff}\") | .id" 2>/dev/null || true)"
+            --jq ".workflow_runs[] | select(.status == \"completed\" and .conclusion == \"success\" and .created_at < \"${cutoff}\") | .id" 2>/dev/null)"; then
+            :
+          else
+            echo "::warning::古い run の列挙に失敗しました。今回は削除できていません（古い public run が残っている可能性があります）。"
+            exit 0
+          fi
 
           if [ -z "$ids" ]; then
             echo "削除対象なし。"

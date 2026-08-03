@@ -477,13 +477,15 @@ for (const p of batch) {
 
 // ── PR タイトル・本文と outputs ──────────────────────────────────────────────
 const slug = branchSlug(batch[0].name);
-// cleanup ブランチ名は**提案ファイル名から復元できない形**にする。ブランチ名は ops-sync（public）の
-// ジョブログにそのまま出る（`uses:` ステップの with: は必ずログに出るうえ、`gh pr merge` も出す）ので、
-// slug をそのまま使うと提案元 consumer の提案名が世界公開の run ログに載る
-// （→ shared/docs/ci-logs.md 手順A-6）。バッチ先頭の提案名から決まる点は同じなので、
-// 「同じバッチを再処理すると同じブランチ＝open のままの PR を force-push で更新する」性質は保つ。
+// cleanup ブランチ名に**提案ファイル名由来の値を使わない**（MUST NOT: 素のハッシュも含む）。ブランチ名は
+// ops-sync（public）のジョブログにそのまま出る（`uses:` ステップの with: は必ずログに出るうえ、
+// `gh pr merge` も出す）。提案ファイル名は「日時＋人が読めるスラッグ」で推測できるので、鍵の無い
+// 12桁ハッシュでは総当たりで一致させられる＝秘匿になっていない（→ shared/docs/ci-logs.md 手順A-6）。
+// consumer 名は `consumers.txt` で既に公開されているので、これを使えば新しい情報は漏れない。
+// 1 run = 1 consumer 分のバッチなので、consumer ごとに固定でも「同じ相手の掃除 PR を再利用する」
+// 性質は保たれる（むしろバッチ先頭が変わるたびに2本目の掃除 PR ができる問題も消える）。
 // 取り込み（intake）側は public な ops-sync に立てるブランチで、提案内容自体が公開 PR になるため slug のまま。
-const cleanupSlug = hash12(batch[0].name);
+const cleanupSlug = consumerRepo.split('/')[1] || 'consumer';
 const titlePrefix = staleMismatch ? '[要確認: ベース不一致] ' : '';
 const prTitle = applied.length === 1
   ? `${titlePrefix}${applied[0].title}`
