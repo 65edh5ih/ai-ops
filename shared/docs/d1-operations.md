@@ -55,7 +55,8 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
   根拠にしない**（MUST NOT）——設定は本番より進んでいることも遅れていることもあり、環境別バインディング
   （`[env.<name>.d1_databases]` 等）があれば**トップレベルの定義が本番とは限らない**。設定ファイルの形式も
   リポジトリによって違う（`wrangler.toml` / `wrangler.json` / `wrangler.jsonc`）。
-  **デプロイ状態から解決する**（MUST）: 稼働中バージョンのバインディングを見る（具体的な手段は手順2）。
+  **デプロイ状態から解決する**（MUST）: 稼働中バージョンのバインディングを見る（**段階的デプロイでは
+  複数バージョンが同時に本番を持つ**ので、トラフィックを受けている全バージョンを見る。具体的な手段は手順2）。
   設定ファイルから読んだ ID は、その バインディングと**一致することを確認してから使う**（MUST）。一致しないまま設定側の DB を数えると、
   期待どおりの 0 件が返っても**本番が別の DB を向いたまま**互換コードを消すことになる。
 - `<検証SQL>`: 「残っていてはいけない行」を数える集計クエリ。**期待値を先に決める**（通常 0）。
@@ -67,7 +68,7 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
    `wrangler d1 execute <db> --remote --command '<SQL>'`。
    **完了条件**: 経路が1つ特定できている。1つも無ければ**ここで停止**してユーザーに読み取り経路の付与を
    依頼する（MUST）。別の判断（推測で互換コードを残す等）へ勝手に切り替えない（MUST NOT）。
-2. `<database_id>` が**いま動いているバージョンのバインディング**と一致することを確認する。設定ファイルの
+2. `<database_id>` が**いま動いているバージョン（複数ありうる）のバインディング**と一致することを確認する。設定ファイルの
    定義は**候補**として使ってよいが、それだけを根拠にしない（MUST NOT）。名前の似た staging/preview を
    掴んでいないかもここで見る。
 
@@ -119,6 +120,11 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
 一度きりの移行機能を撤去したあと、その機能だけが使っていた列・テーブルが本番に残る。参照するコードが
 無くなっていれば無害だが、消すなら**順序と前提条件**がある。どちらも外すと静かに失敗する。
 
+> **識別子の比較は一貫して `COLLATE NOCASE`**（MUST）。SQLite の識別子は大小を区別しないが、
+> `sqlite_master` / `pragma_*` は**宣言に書かれた表記のまま**返す。素の `=` で比べると、事前確認では
+> 「阻害要因なし」で通り、検算では「消えている」と誤って合格する——**どちらも誤りが安全側に出ない**。
+> 以下の SQL で `COLLATE NOCASE` を落とさない（`LIKE` は既定で ASCII 大小を無視するので不要）。
+
 ### 手順
 
 1. **先にコードの撤去を本番へデプロイし、稼働中のコードにその列／テーブルへの参照が無いことを実物で確かめる**（MUST）。
@@ -130,9 +136,13 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
    （Cloudflare MCP / API の Worker code 取得など）。デプロイ一覧を見るコマンド（`wrangler deployments status`）は
    **バージョンが進んだことしか示さず、中身を見せない**ので、これだけで完了にしない（MUST NOT）。
    撤去していない機能の識別子が同じ取得結果に**存在する**ことも併せて見る（取り違え・古い版を掴んでいない証拠）。
-   **段階的デプロイ中は「まだ旧コードも動いている」**（上記のトラフィック分割）。分割が残っている間は
-   旧版の ensure が列を作り直すので、**トラフィックを受けている全バージョンから撤去済みであること**を
-   確認してから消す（MUST）。
+   **段階的デプロイ中は消さない**（MUST）。トラフィック分割が残っている間は旧版も動いており、その ensure が
+   列を作り直す。**バージョンごとのコードを取り出せる経路は無いことが多い**（バインディングを見る
+   `versions view` はコードを返さず、コード取得は「いま配信されているスクリプト」単位のことが多い）ので、
+   **全バージョンの中身を確かめよ、という要求にはしない**（MUST NOT: 実行手段の無い条件を課す）。かわりに
+   **分割が解消していること**——`deployments status` で対象バージョンが 100%——を確認する。これは手順2で
+   使う経路そのもので確かめられる。分割中なら**ロールアウト完了を待ってから消す**（急ぐ理由は無い。
+   残骸は放置しても無害）。100% を示せない環境なら、そこで停止してユーザーに確認を依頼する（MUST）。
 2. **前提条件を確認する**（MUST）。消す対象が列かテーブルかで見るものが違う。
 
    **列を消す場合**: SQLite は**索引・PK・UNIQUE 制約・外部キー・生成列・ビュー/トリガ/CHECK 式に
@@ -142,10 +152,10 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
 
    ```sql
    -- (a) テーブル自身の DDL（インライン PK/UNIQUE/CHECK・生成列・FK はここにしか出ない）
-   SELECT sql FROM sqlite_master WHERE type='table' AND name='<table>';
+   SELECT sql FROM sqlite_master WHERE type='table' AND name='<table>' COLLATE NOCASE;
    -- (b) そのテーブルに紐づくオブジェクトと、列名に言及するビュー/トリガ
    SELECT type, name, sql FROM sqlite_master
-    WHERE tbl_name = '<table>' OR (type IN ('view','trigger') AND sql LIKE '%<col>%');
+    WHERE tbl_name = '<table>' COLLATE NOCASE OR (type IN ('view','trigger') AND sql LIKE '%<col>%');
    ```
 
    **判定**: (a)(b) の `sql` に対象列名が現れたら、その定義を読んで**関与しているのか単なる同名の別物か**を
@@ -201,8 +211,9 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
    見る。SQLite の DROP COLUMN はテーブルを書き換えるため、行数の確認は形式的ではない:
 
    ```sql
-   SELECT (SELECT COUNT(*) FROM pragma_table_info('<table>') WHERE name = '<col>') AS col_remains,
-          (SELECT COUNT(*) FROM <table>)                                            AS rows_total;
+   SELECT (SELECT COUNT(*) FROM pragma_table_info('<table>')
+             WHERE name = '<col>' COLLATE NOCASE)      AS col_remains,
+          (SELECT COUNT(*) FROM <table>)               AS rows_total;
    ```
 
    **完了条件**: `col_remains` が 0 で、`rows_total` が DDL 前と一致している。
@@ -213,9 +224,10 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
 
    ```sql
    -- (a) テーブル自身が消えたか
-   SELECT COUNT(*) AS table_remains FROM sqlite_master WHERE name = '<table>';
+   SELECT COUNT(*) AS table_remains FROM sqlite_master WHERE name = '<table>' COLLATE NOCASE;
    -- (b) 手順2で「参照している」と判断した依存オブジェクトが残っていないか（名前を列挙する）
-   SELECT type, name FROM sqlite_master WHERE name IN ('<dep1>', '<dep2>');
+   SELECT type, name FROM sqlite_master
+    WHERE name COLLATE NOCASE IN ('<dep1>', '<dep2>');
    ```
 
    **完了条件**: `table_remains` が 0 で、(b) が空。
@@ -289,3 +301,6 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
   確認経路（MCP・API・CLI等）が無いか確認する。
 - **ステージング/preview の DB を掴んだまま「0 件だった」と本番の結論にする**。→ 環境別バインディングが
   あるとトップレベル定義は本番とは限らない。手順2で**稼働中バージョンのバインディング**と一致することを先に示す。
+- **有効なバージョンは1つだと決めつける**。→ 段階的デプロイ中は複数バージョンが同時に本番を持つ。
+  トラフィックが 0 でない全バージョンを見る（スキーマ撤去は分割が解消するまで行わない）。
+- **識別子を素の `=` で比べる**。→ 宣言どおりの表記が返るので取りこぼす。`COLLATE NOCASE` を落とさない。
