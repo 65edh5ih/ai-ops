@@ -76,16 +76,24 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
    報告しない**ので、これを見て「確認した」とは言えない。CLI なら**2段階**になる:
 
    ```sh
-   wrangler deployments status                 # active な version ID を得る
+   wrangler deployments status                 # トラフィックを受けている version と割合を得る
    wrangler versions view <version-id>         # その版の bindings を表示する（ここに D1 の binding 名と ID が出る）
    ```
+
+   **「有効なバージョンは1つ」と決めつけない**（MUST NOT）。段階的デプロイ（`versions deploy` の
+   `<version-id>@<percentage>` によるトラフィック分割）では、**複数のバージョンが同時に本番を受け持つ**。
+   古い版が残ったまま別の binding を指していると、片方だけ見て「これが本番の DB」と決めて撤去に進み、
+   **まだトラフィックを受けている側のデータを見落とす**。`deployments status` が返す割当のうち
+   **トラフィックが 0 でないバージョンすべて**について `versions view` を回し、binding が同じ DB を
+   指していることを確かめる（分割が無い＝1バージョンが 100% であることを示せたなら、その1つでよい）。
 
    CLI が無い環境では、Worker の設定・バージョン情報を返す API／MCP でも同じことを確認できる
    （返ってきた bindings に対象の binding 名と database ID があること）。
 
    **確認経路が1つも無いなら、そこで停止してユーザーに依頼する**（MUST）。稼働中バインディングを
    示せないまま、設定ファイルの ID で本番を数えた結果を根拠にしない（MUST NOT）。
-   **完了条件**: **稼働中バージョンが報告したバインディング**と ID が一致している。設定ファイルとの
+   **完了条件**: **トラフィックを受けている全バージョンが報告したバインディング**が対象 DB を指している
+   （分割が無いことを示せた場合はその1バージョン）。設定ファイルとの
    一致だけでは完了にしない（MUST NOT）——設定が本番より進んでいる／遅れていると、期待どおりの 0 件が
    返っても本番は別 DB を向いたままになる。一致を示せないなら停止して確認する（MUST）。
    **ステージングの 0 件を本番の証拠として報告しない**（MUST NOT）。
@@ -122,6 +130,9 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
    （Cloudflare MCP / API の Worker code 取得など）。デプロイ一覧を見るコマンド（`wrangler deployments status`）は
    **バージョンが進んだことしか示さず、中身を見せない**ので、これだけで完了にしない（MUST NOT）。
    撤去していない機能の識別子が同じ取得結果に**存在する**ことも併せて見る（取り違え・古い版を掴んでいない証拠）。
+   **段階的デプロイ中は「まだ旧コードも動いている」**（上記のトラフィック分割）。分割が残っている間は
+   旧版の ensure が列を作り直すので、**トラフィックを受けている全バージョンから撤去済みであること**を
+   確認してから消す（MUST）。
 2. **前提条件を確認する**（MUST）。消す対象が列かテーブルかで見るものが違う。
 
    **列を消す場合**: SQLite は**索引・PK・UNIQUE 制約・外部キー・生成列・ビュー/トリガ/CHECK 式に
@@ -148,11 +159,17 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
    ```sql
    SELECT m.name AS child_table, f."from" AS child_col, f."to" AS parent_col
      FROM sqlite_master AS m JOIN pragma_foreign_key_list(m.name) AS f
-    WHERE m.type = 'table' AND f."table" = '<table>';
+    WHERE m.type = 'table' AND f."table" = '<table>' COLLATE NOCASE;
    ```
 
-   `parent_col` が対象列と一致する行があれば、その子の FK ごと（または子テーブルごと）先に手当てする。
-   `parent_col` が NULL の行は**親の PK を暗黙参照**しているだけなので、PK でない列を消すぶんには関係ない。
+   **`COLLATE NOCASE` を落とさない**（MUST）。SQLite の識別子は大文字小文字を区別しないが、
+   `pragma_foreign_key_list` は**宣言に書かれた表記のまま**返す（実測: 子が `REFERENCES Parent(old_col)` と
+   書いていれば `Parent` が返る）。素の `=` で比べると**一致せず 0 件になり、検査が「異常なし」で通ってしまう**
+   ——見落としが最悪の形で出る箇所なので、ここだけは緩い側に倒す。
+
+   `parent_col` が対象列と一致する行（**これも大文字小文字を無視して比べる**。列名も宣言どおりの表記で返る）が
+   あれば、その子の FK ごと（または子テーブルごと）先に手当てする。`parent_col` が NULL の行は**親の PK を
+   暗黙参照**しているだけなので、PK でない列を消すぶんには関係ない。
 
    **これは「消せてしまう」ので特に危ない**（実測で確認・SQLite 3.45）: inbound FK がある列でも
    `PRAGMA foreign_keys=ON/OFF` のどちらでも **DROP COLUMN は成功する**。子の DDL は
