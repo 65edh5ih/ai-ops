@@ -1,1 +1,0 @@
-../shared/docs/d1-capacity.md
