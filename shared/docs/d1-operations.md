@@ -140,8 +140,8 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
    列を作り直す。**バージョンごとのコードを取り出せる経路は無いことが多い**（バインディングを見る
    `versions view` はコードを返さず、コード取得は「いま配信されているスクリプト」単位のことが多い）ので、
    **全バージョンの中身を確かめよ、という要求にはしない**（MUST NOT: 実行手段の無い条件を課す）。かわりに
-   **分割が解消していること**——`deployments status` で対象バージョンが 100%——を確認する。これは手順2で
-   使う経路そのもので確かめられる。分割中なら**ロールアウト完了を待ってから消す**（急ぐ理由は無い。
+   **分割が解消していること**——`deployments status` で対象バージョンが 100%——を確認する。これは前節
+   「本番データの直接確認」の手順2で使う経路そのもので確かめられる（この節の手順2ではない）。分割中なら**ロールアウト完了を待ってから消す**（急ぐ理由は無い。
    残骸は放置しても無害）。100% を示せない環境なら、そこで停止してユーザーに確認を依頼する（MUST）。
 2. **前提条件を確認する**（MUST）。消す対象が列かテーブルかで見るものが違う。
 
@@ -195,7 +195,7 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
    ```sql
    -- 対象テーブルを参照しているビュー・トリガ・他テーブルの FK 定義
    SELECT type, name, sql FROM sqlite_master
-    WHERE name <> '<table>' AND sql LIKE '%<table>%';
+    WHERE name <> '<table>' COLLATE NOCASE AND sql LIKE '%<table>%';
    ```
 
    **完了条件**: 出てきた定義をすべて読み、消してよい（誰も参照していない／参照側も同時に撤去する）と
@@ -211,10 +211,14 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
    見る。SQLite の DROP COLUMN はテーブルを書き換えるため、行数の確認は形式的ではない:
 
    ```sql
-   SELECT (SELECT COUNT(*) FROM pragma_table_info('<table>')
+   SELECT (SELECT COUNT(*) FROM pragma_table_xinfo('<table>')
              WHERE name = '<col>' COLLATE NOCASE)      AS col_remains,
           (SELECT COUNT(*) FROM <table>)               AS rows_total;
    ```
+
+   **`pragma_table_info` ではなく `pragma_table_xinfo` を使う**（MUST）。`table_info` は**生成列を返さない**
+   （実測: VIRTUAL/STORED とも hidden=2/3 で非表示）。対象が生成列だと、DDL が失敗していても
+   `col_remains=0` になり**誤って合格する**。
 
    **完了条件**: `col_remains` が 0 で、`rows_total` が DDL 前と一致している。
 
@@ -223,12 +227,17 @@ Cloudflare D1 を扱うときの共通規約を1か所に集約する。扱う�
    判定は**名前の完全一致**で行う（MUST）:
 
    ```sql
-   -- (a) テーブル自身が消えたか
-   SELECT COUNT(*) AS table_remains FROM sqlite_master WHERE name = '<table>' COLLATE NOCASE;
+   -- (a) テーブル自身が消えたか（type を絞る。絞らないと同名の別種オブジェクトを数えてしまう）
+   SELECT COUNT(*) AS table_remains FROM sqlite_master
+    WHERE type = 'table' AND name = '<table>' COLLATE NOCASE;
    -- (b) 手順2で「参照している」と判断した依存オブジェクトが残っていないか（名前を列挙する）
    SELECT type, name FROM sqlite_master
     WHERE name COLLATE NOCASE IN ('<dep1>', '<dep2>');
    ```
+
+   **`type = 'table'` を落とさない**（MUST）。トリガはテーブルと別の名前空間なので**同名で共存できる**
+   （実測: テーブル `Log` とトリガ `log` が並存し、`DROP TABLE Log` 成功後も type 無しの数え方では 1 のまま）。
+   落とすと、この doc 自身が戒めている**満たせないゲート**になる。
 
    **完了条件**: `table_remains` が 0 で、(b) が空。
 
