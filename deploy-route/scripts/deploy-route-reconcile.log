@@ -1,5 +1,5 @@
 usable: true
-signals: {"actions":{"state":"ok","age_hours":0.92},"cloudflare":{"pages_builds":"ok","workers_build_minutes":"ok","age_hours":0.73}}
+signals: {"actions":{"state":"ok","age_hours":0.86},"cloudflare":{"pages_builds":"ok","workers_build_minutes":"ok","age_hours":0.63}}
 nikki-san/blog: github — Actions 枠に余裕あり
 nikki-san/admin: github — Actions 枠に余裕あり
 private/workers: github — Actions 枠に余裕あり
