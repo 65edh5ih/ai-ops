@@ -1,6 +1,6 @@
-repo=65edh5ih/nikki-san status=ok pages=1 prs_scanned=34 open_findings=1
+repo=65edh5ih/nikki-san status=ok pages=1 prs_scanned=33 open_findings=1
 repo=65edh5ih/ops-runner status=ok pages=1 prs_scanned=17 open_findings=1
-repo=65edh5ih/ops-sync status=ok pages=1 prs_scanned=26 open_findings=7
-repo=65edh5ih/private status=ok pages=1 prs_scanned=26 open_findings=4
+repo=65edh5ih/ops-sync status=ok pages=1 prs_scanned=25 open_findings=7
+repo=65edh5ih/private status=ok pages=1 prs_scanned=25 open_findings=4
 carried_over prs_rechecked=0 open_findings=0
-summary repos=4 slice_repos=2 failures=0 open_findings=13 merged_unresolved=11 closed_excluded=0 files_changed=0 lookback_days=3 ratelimit_remaining=4614
+summary repos=4 slice_repos=2 failures=0 open_findings=13 merged_unresolved=11 closed_excluded=0 files_changed=0 lookback_days=3 ratelimit_remaining=4890
