@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-08-06T10:02:40.473Z",
+  "generated_at": "2026-08-06T15:33:11.551Z",
   "usable": true,
   "signals": {
     "actions": {
       "state": "ok",
-      "age_hours": 0.9
+      "age_hours": 0.84
     },
     "cloudflare": {
       "pages_builds": "ok",
