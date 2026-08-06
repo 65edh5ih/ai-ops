@@ -1,15 +1,15 @@
 {
-  "generated_at": "2026-08-05T20:40:52.677Z",
+  "generated_at": "2026-08-06T04:33:02.481Z",
   "usable": true,
   "signals": {
     "actions": {
       "state": "ok",
-      "age_hours": 0.72
+      "age_hours": 0.84
     },
     "cloudflare": {
       "pages_builds": "ok",
       "workers_build_minutes": "ok",
-      "age_hours": 0.46
+      "age_hours": 0.66
     }
   },
   "targets": {
