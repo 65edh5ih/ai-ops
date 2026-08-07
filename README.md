@@ -151,6 +151,8 @@ consumer 側のセットアップは**不要**（workflow・Secret とも置か�
   *Archive task histories* workflow（cron 1日1回）が ops-sync と全 consumer を巡回し、フラグメントを
   `docs/AI_TASK_HISTORY.md` へ統合＋保持量（直近2作業日分）超過分をアーカイブする PR を自動マージする。
   統合時、本体に既にある同一本文のエントリは取り込まず、そのフラグメントは削除して掃除する（重複記録の防止）。
+  本文の無い見出し（見出しだけのブロック）も取り込まない（恒久履歴に空レコードを残さない）。取り込めるエントリが
+  1つも無いフラグメントは削除もしないので、書きかけのファイルは inbox に残り続ける（警告は対象リポジトリの ci-logs）。
   急ぐときは workflow を手動実行する。`docs/history-inbox/` は配布された `README.md` プレースホルダ
   （正本 `shared/docs/history-inbox/README.md`）で常設し、全フラグメント統合後もディレクトリが消えないようにする。
 - **同期PRのマージ**: `sync.yml` の `MERGE_MODE` で選ぶ。`direct`（即マージ・完全自動）/

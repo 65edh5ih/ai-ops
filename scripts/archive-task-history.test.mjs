@@ -18,12 +18,13 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const script = path.join(root, 'scripts', 'archive-task-history.mjs');
 
-function run(fragments, { history = '' } = {}) {
+function run(fragments) {
   const repo = mkdtempSync(path.join(tmpdir(), 'archive-history-'));
   const docs = path.join(repo, 'docs');
   const inbox = path.join(docs, 'history-inbox');
   mkdirSync(inbox, { recursive: true });
-  writeFileSync(path.join(docs, 'AI_TASK_HISTORY.md'), history);
+  // 本体は空で先に作る（スクリプトが早期 exit する経路でも読み出せるように）。
+  writeFileSync(path.join(docs, 'AI_TASK_HISTORY.md'), '');
   for (const [name, text] of Object.entries(fragments)) writeFileSync(path.join(inbox, name), text);
 
   const res = spawnSync(process.execPath, [script, repo], { encoding: 'utf8' });
@@ -42,7 +43,8 @@ test('見出しが重複したフラグメントでも空エントリを本体�
   // 見出しは1本だけ（＝空エントリが増えていない）
   assert.equal(history.match(/^## 2026-08-03 タイトル$/gm)?.length, 1, history);
   assert.match(history, /本文がここにある。/);
-  assert.match(stderr, /skip-empty/);
+  // 落とした見出しは警告に載る（フラグメントは削除されるので、載せないと復元できない）
+  assert.match(stderr, /skip-empty .*## 2026-08-03 タイトル/);
 });
 
 test('正常なフラグメントはそのまま取り込む', () => {
@@ -59,7 +61,9 @@ test('本文の無い見出しだけのフラグメントは消費せず残す',
   const { history, stderr } = run({ '2026-08-03T140000Z-empty-cccccccccccc.md': empty });
 
   assert.doesNotMatch(history, /見出しだけ/);
-  assert.match(stderr, /skip-empty/);
-  // 有効エントリが0件なのでフラグメントは削除対象にならない（= skip の警告が出る）
-  assert.match(stderr, /日付付き '## YYYY-MM-DD' エントリが無い/);
+  assert.match(stderr, /skip-empty .*## 2026-08-03 見出しだけ/);
+  // 有効エントリが0件なのでフラグメントは削除対象にならない（= skip の警告が出る）。
+  // 理由は「日付付き見出しが無い」ではなく「空だけ」——読んだ人が原因を取り違えないこと。
+  assert.match(stderr, /skip .*本文の無い見出し 1 件だけで、取り込めるエントリが無い（削除しない）/);
+  assert.doesNotMatch(stderr, /日付付き '## YYYY-MM-DD' エントリが無い/);
 });
