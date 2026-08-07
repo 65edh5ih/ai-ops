@@ -52,8 +52,12 @@
    マーカーの状態は区間を選ぶ前に全数検査し、**健全と認めるのは「現行 `OPS-SYNC:COMMON` の組が start→end の順に
    ちょうど1組」か「皆無」だけ**——片方だけ・順序逆・重複はいずれも失敗させる。旧 `AI-OPS:COMMON` マーカーの
    **自動移行はもう行わない**ので、残っていればそれだけで失敗させる（黙って処理すると新マーカーが見つからず
-   追記フォールバックに落ちて二重掲載になる。人が消してから再実行する）。黙って追記や部分置換に落とすと、
-   壊れたマーカーと古い本文が残ったまま共通ブロックが増え、規約が二重に載るため）。
+   追記フォールバックに落ちて二重掲載になる。人が消してから再実行する）。検出は
+   `<!-- AI-OPS:COMMON START|END … -->` という**コメント構文に一致したときだけ**なので、
+   「旧マーカー `AI-OPS:COMMON` は使うな」のように**本文で名前に言及するのは安全**
+   （素の部分文字列で数えると、注意書きを1行書いた副作用でその consumer への配布が止まる）。
+   黙って追記や部分置換に落とすと、壊れたマーカーと古い本文が残ったまま共通ブロックが増え、
+   規約が二重に載るため）。
    全 consumer の全タスクのコンテキストコストに乗るため最小限に保つ（上りの `common-block-edit`
    取り込み PR には、この層のサイズ増減〔文字数・概算トークン〕が自動記載され、マージ判断の場で
    肥大化が見える）。
@@ -106,7 +110,7 @@ consumer へ伝播する（追加しかできない実装だと撤去がドリ�
 | `shared/scripts/new-task-history.mjs` | （下り・履歴）時刻＋ランダムIDで一意な履歴フラグメントを排他的に新規作成する共通スクリプト |
 | `scripts/new-task-history.mjs` | ops-sync自身が上記正本をconsumerと同じパスで使うためのsymlink |
 | `sync-deletions.txt` | （下り）manifest 導入前の unmanaged ファイルを consumer から撤去する一覧 |
-| `.github/workflows/sync.yml` | （下り）main の変更＋cron（1日1回の再適用＝手編集ドリフトの自己修復）で各 consumer へ同期 PR を生成し、MERGE_MODE に応じてマージ |
+| `.github/workflows/sync.yml` | （下り）main の変更＋cron（1日1回の再適用＝手編集ドリフトの自己修復）で各 consumer へ同期 PR を生成し、MERGE_MODE に応じてマージ。配布の前に `node --test`（`scripts/*.test.mjs` 全部）を通し、落ちたら全 consumer への配布を止める |
 | `consumers.txt` | 配布先リポジトリ（`owner/repo`） |
 | `scripts/collect-outbox.mjs` | （上り）consumer の `.ops-sync/outbox/*.md` 提案を種別に応じて反映（1 consumer 分をまとめて処理・不正な提案は `rejected/` へ差し戻し） |
 | `.github/workflows/collect-outbox.yml` | （上り）cron（約6時間ごと）＋手動で起動、取り込み PR＋outbox 掃除 PR を生成。あわせてトゥームストーン掃除（保守）。処理ログ（提案名・却下理由）は**提案元 consumer の `ci-logs`** へ、ops-sync には件数だけ。consumer 側の掃除 PR は `create-pr-quiet` で作る（取り込み・トゥームストーンは ops-sync 自身への PR なので従来どおり `peter-evans/create-pull-request`） |
