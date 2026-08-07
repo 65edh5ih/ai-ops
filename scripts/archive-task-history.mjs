@@ -87,15 +87,25 @@ if (existsSync(inboxDir)) {
     // 1本目が「見出しだけ・本文なし」のブロックになる。そのまま取り込むと、**本体やアーカイブに
     // 中身の無いエントリが恒久的に残る**（統合件数も水増しされる）。ここで落とせば、残りの
     // 正当なエントリは取り込まれ、フラグメントも通常どおり消費できる。
-    const dated = blocks.filter((b) => b.date);
-    const entries = dated.filter((b) => {
-      const body = b.text.split('\n').slice(1).join('\n').trim();
-      if (body) return true;
-      console.warn(`skip-empty ${path.join('docs/history-inbox', f)}: 本文の無い見出しを1件落とした（見出しの重複を疑う）`);
+    // 落としたブロックは**見出し行そのものを警告に載せる**（MUST）。有効エントリが1つでもあると
+    // フラグメントは削除されるので、見出しを書かないと落とした中身が復元できなくなる（このログの
+    // 出力先は対象リポジトリ自身の ci-logs で、既にフラグメント名を含む＝機微の扱いは同じ）。
+    let droppedEmpty = 0;
+    const entries = blocks.filter((b) => {
+      if (!b.date) return false;
+      const [heading, ...rest] = b.text.split('\n');
+      if (rest.join('\n').trim()) return true;
+      droppedEmpty += 1;
+      console.warn(`skip-empty ${path.join('docs/history-inbox', f)}: 本文の無い見出しを1件落とした（見出しの重複を疑う）: ${heading.trim()}`);
       return false;
     });
     if (entries.length === 0) {
-      console.warn(`skip ${path.join('docs/history-inbox', f)}: 日付付き '## YYYY-MM-DD' エントリが無い（削除しない）`);
+      // 落とした空エントリがあるなら原因は「日付付き見出しが無い」ではないので、そう書かない
+      // （読んだ人がファイルを開いて正しい見出しを見つけ、バッチ側の不具合だと誤読する）。
+      const why = droppedEmpty > 0
+        ? `本文の無い見出し ${droppedEmpty} 件だけで、取り込めるエントリが無い`
+        : "日付付き '## YYYY-MM-DD' エントリが無い";
+      console.warn(`skip ${path.join('docs/history-inbox', f)}: ${why}（削除しない）`);
       continue;
     }
     const fresh = [];
