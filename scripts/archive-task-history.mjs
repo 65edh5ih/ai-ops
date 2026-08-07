@@ -82,7 +82,18 @@ if (existsSync(inboxDir)) {
   for (const f of files) {
     const fp = path.join(inboxDir, f);
     const { blocks } = splitBlocks(readFileSync(fp, 'utf8'));
-    const entries = blocks.filter((b) => b.date); // 日付付き `## ` 見出しだけを取り込む
+    // 日付付き `## ` 見出しだけを取り込む。さらに**本文が空のブロックは落とす**（MUST）——
+    // フラグメントに見出しが2本あると（生成した見出しの後ろに手で同じ見出しを書く等）、
+    // 1本目が「見出しだけ・本文なし」のブロックになる。そのまま取り込むと、**本体やアーカイブに
+    // 中身の無いエントリが恒久的に残る**（統合件数も水増しされる）。ここで落とせば、残りの
+    // 正当なエントリは取り込まれ、フラグメントも通常どおり消費できる。
+    const dated = blocks.filter((b) => b.date);
+    const entries = dated.filter((b) => {
+      const body = b.text.split('\n').slice(1).join('\n').trim();
+      if (body) return true;
+      console.warn(`skip-empty ${path.join('docs/history-inbox', f)}: 本文の無い見出しを1件落とした（見出しの重複を疑う）`);
+      return false;
+    });
     if (entries.length === 0) {
       console.warn(`skip ${path.join('docs/history-inbox', f)}: 日付付き '## YYYY-MM-DD' エントリが無い（削除しない）`);
       continue;
