@@ -46,6 +46,18 @@ jobs:
       consumers: ${{ steps.read.outputs.list }}
     steps:
       - uses: actions/checkout@v5
+      # 回帰テストを**配布の前に**通す（sync ジョブは needs: prepare なので、ここが落ちれば
+      # 全 consumer への配布が止まる）。手元でしか走らないテストは、判定を緩めた変更が
+      # 配布まで通ってしまうのを止められない。
+      # **PR のゲートではない**（このリポジトリに `pull_request` 起点の CI は無く、この workflow は
+      # main への push・cron・手動でしか走らない）。止められるのはマージではなく**配布**。
+      # また `node --test` は `scripts/*.test.mjs` を**全部**走らせるので、配布に関係しない
+      # スクリプト（codex-review-inbox 等）のテストが落ちても配布は止まる（＝赤い main では
+      # 配らない、が意図。cron の自己修復も同じ条件で止まる）。
+      - name: Test all scripts (gates distribution)
+        run: |
+          set -euo pipefail
+          node --test
       - id: read
         # consumers.txt から # と空行を除き、JSON 配列にしてマトリクスへ渡す
         run: |
@@ -82,14 +94,25 @@ jobs:
           - Started: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
           EOF
 
+      # 以下3ステップは `| tee` でログにも落とすため、**必ず `set -o pipefail` を置く**。
+      # `run:` の既定シェルは `bash -e {0}` で pipefail が入らず（`shell: bash` を明記したときだけ
+      # `-eo pipefail` になる）、パイプの終了コードは tee の 0 になる。これが無いと
+      # apply-common.mjs の `process.exit(1)`（＝マーカーが壊れているので配布を止める判定）が
+      # 握り潰され、壊れた状態のまま同期 PR が作られて direct マージまで進む。
       - name: Apply common block to consumer AGENTS.md
-        run: node scripts/apply-common.mjs AGENTS_COMMON.md consumer/AGENTS.md 2>&1 | tee /tmp/ci-logs/apply-common.log
+        run: |
+          set -euo pipefail
+          node scripts/apply-common.mjs AGENTS_COMMON.md consumer/AGENTS.md 2>&1 | tee /tmp/ci-logs/apply-common.log
 
       - name: Wire agent entrypoints (CLAUDE.md / GEMINI.md -> AGENTS.md)
-        run: node scripts/apply-entrypoints.mjs consumer 2>&1 | tee /tmp/ci-logs/apply-entrypoints.log
+        run: |
+          set -euo pipefail
+          node scripts/apply-entrypoints.mjs consumer 2>&1 | tee /tmp/ci-logs/apply-entrypoints.log
 
       - name: Apply shared files / tasks / deletions to consumer
-        run: node scripts/apply-shared.mjs . consumer "${{ matrix.consumer }}" 2>&1 | tee /tmp/ci-logs/apply-shared.log
+        run: |
+          set -euo pipefail
+          node scripts/apply-shared.mjs . consumer "${{ matrix.consumer }}" 2>&1 | tee /tmp/ci-logs/apply-shared.log
 
       - name: Create or update sync PR
         id: create-pr

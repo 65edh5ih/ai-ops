@@ -14,8 +14,13 @@ const END = '<!-- OPS-SYNC:COMMON END -->';
 // 判定は**マーカーのコメント構文まで一致させる**（素の部分文字列 `AI-OPS:COMMON` で数えると、
 // 「旧マーカーは使うな」と本文で言及しただけの AGENTS.md まで壊れた状態と誤判定し、同期全体を止める）。
 // START 側の説明文は consumer ごとに揺れうるので、`<!-- AI-OPS:COMMON START|END … -->` の骨格だけを見る。
+// 名前は1箇所だけに置き、正規表現はそこから組み立てる（素の文字列と正規表現の両方に書くと、
+// 片方だけ直したときに「検出しないのにエラー文だけ新しい」状態へ静かに倒れる）。
 const LEGACY_MARKER_NAME = 'AI-OPS:COMMON';
-const LEGACY_MARKER_RE = /<!--\s*AI-OPS:COMMON\s+(?:START|END)\b[^>]*-->/g;
+const LEGACY_MARKER_RE = new RegExp(
+  `<!--\\s*${LEGACY_MARKER_NAME}\\s+(?:START|END)\\b[^>]*-->`,
+  'g',
+);
 
 const [, , commonPath, targetPath] = process.argv;
 if (!commonPath || !targetPath) {
@@ -40,13 +45,21 @@ function findRegion(text) {
 // 健全な側の区間だけ差し替えると、壊れたマーカーと古い本文が残ったまま共通ブロックがもう1つ増え、
 // 全エージェントが読む AGENTS.md に同じ規約が二重に載る。黙って直せないので失敗させる。
 // 健全と認めるのは「現行の組が start→end の順にちょうど1組」か「皆無」（＝初回配線）だけ。
+// 現行マーカーだけは**素の部分文字列で数える**（旧マーカーと違ってコメント構文に緩めない）。
+// 区間の切り出し `findRegion` が `indexOf` で位置を決める以上、本文に丸ごと引用された1件も
+// 実マーカーと見分けがつかず、緩めると引用の側を境界に選んで本文を削りかねないため。
+// 代わりにエラー文で「引用も数える」と伝え、人が引用を崩して再実行できるようにする。
 function markerProblems(text) {
   const count = (needle) => text.split(needle).length - 1;
   const problems = [];
   const ns = count(START);
   const ne = count(END);
   if (ns > 1 || ne > 1) {
-    problems.push(`OPS-SYNC:COMMON: duplicated markers (start x${ns}, end x${ne})`);
+    problems.push(
+      `OPS-SYNC:COMMON: duplicated markers (start x${ns}, end x${ne}); ` +
+        'note: the current markers are counted as plain substrings, so a marker quoted ' +
+        'verbatim in prose or in an example also counts — quote it partially instead',
+    );
   } else if (ns !== ne) {
     problems.push(`OPS-SYNC:COMMON: unpaired marker (start x${ns}, end x${ne})`);
   } else if (ns === 1 && text.indexOf(END) < text.indexOf(START)) {
