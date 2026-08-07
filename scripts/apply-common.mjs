@@ -11,7 +11,11 @@ const END = '<!-- OPS-SYNC:COMMON END -->';
 // 旧マーカー（リポジトリ名が ai-ops だった頃）。移行は全 consumer で完了したので**もう変換しない**が、
 // 検出だけ残す: 旧マーカーだけの AGENTS.md を黙って処理すると、新マーカーが見つからず追記
 // フォールバックへ落ちて共通ブロックが二重になる。壊すより失敗させて人に掃除させる。
-const LEGACY_MARKER = 'AI-OPS:COMMON';
+// 判定は**マーカーのコメント構文まで一致させる**（素の部分文字列 `AI-OPS:COMMON` で数えると、
+// 「旧マーカーは使うな」と本文で言及しただけの AGENTS.md まで壊れた状態と誤判定し、同期全体を止める）。
+// START 側の説明文は consumer ごとに揺れうるので、`<!-- AI-OPS:COMMON START|END … -->` の骨格だけを見る。
+const LEGACY_MARKER_NAME = 'AI-OPS:COMMON';
+const LEGACY_MARKER_RE = /<!--\s*AI-OPS:COMMON\s+(?:START|END)\b[^>]*-->/g;
 
 const [, , commonPath, targetPath] = process.argv;
 if (!commonPath || !targetPath) {
@@ -49,9 +53,11 @@ function markerProblems(text) {
     problems.push('OPS-SYNC:COMMON: end marker appears before start marker');
   }
   // 旧マーカーはもう変換しない。残っていたら追記フォールバックで二重掲載になるので弾く。
-  if (count(LEGACY_MARKER) > 0) {
+  const legacy = text.match(LEGACY_MARKER_RE);
+  if (legacy) {
     problems.push(
-      `${LEGACY_MARKER}: legacy markers are no longer migrated; remove them (keep only the OPS-SYNC:COMMON pair)`,
+      `${LEGACY_MARKER_NAME}: legacy markers are no longer migrated (found x${legacy.length}); ` +
+        'remove them (keep only the OPS-SYNC:COMMON pair)',
     );
   }
   return problems;
