@@ -2,7 +2,7 @@
   "state": "ok",
   "threshold_pct": 90,
   "stale_after_hours": 24,
-  "checked_at": "2026-08-06T14:42:39Z",
+  "checked_at": "2026-08-07T00:17:34Z",
   "source": "enhanced:users",
   "note": "usage measured from minute-metered actions items against configured included minutes"
 }
