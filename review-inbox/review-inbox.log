@@ -1,0 +1,5 @@
+repo=65edh5ih/nikki-san status=ok pages=16 prs_scanned=800 open_findings=0
+repo=65edh5ih/ops-runner status=ok pages=2 prs_scanned=77 open_findings=0
+repo=65edh5ih/ops-sync status=ok pages=4 prs_scanned=186 open_findings=0
+repo=65edh5ih/private status=ok pages=11 prs_scanned=540 open_findings=0
+summary repos=4 slice_repos=2 failures=0 open_findings=0 merged_unresolved=0 closed_excluded=0 files_changed=6 lookback_days=90 ratelimit_remaining=4021
