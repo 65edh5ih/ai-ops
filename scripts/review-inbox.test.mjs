@@ -174,6 +174,31 @@ test('Codex 以外の投稿者（オーナー login＝Claude Code の経路）�
   assert.match(all, /二重に閉じている/);
 });
 
+// 見出しの拾い方。Codex は必ず太字ヘッダで始まるが、投稿者を問わなくなったので
+// 「地の文に強調を含むだけ」の指摘が来る。そこを見出しに採ると表が読めなくなる。
+test('見出しは行頭の太字だけを採り、地の文の強調は採らない', () => {
+  const { all } = run({
+    recentPrs: [
+      pr(1, {
+        state: 'OPEN',
+        merged: false,
+        threads: [
+          thread({
+            url: 'https://x/#o1',
+            author: OWNER,
+            body: 'The retry loop never terminates when **attempt** exceeds the max.',
+          }),
+          thread({ url: 'https://x/#o2', author: OWNER, body: '*Note:* the guard was removed here' }),
+        ],
+      }),
+    ],
+  });
+
+  assert.match(all, /The retry loop never terminates when attempt exceeds the max\./);
+  assert.doesNotMatch(all, /\| attempt \|/); // 強調部分だけが見出しになっていない
+  assert.match(all, /Note: the guard was removed here/); // 開き側だけ消えて `Note:*` にならない
+});
+
 test('author が取れないスレッドも落とさない', () => {
   const { all, outputs } = run({
     recentPrs: [pr(2, { state: 'OPEN', merged: false, threads: [thread({ url: 'https://x/#o1', author: null })] })],

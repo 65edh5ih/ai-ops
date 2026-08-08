@@ -41,7 +41,10 @@ push するので放っておけば入れ替わる。**共通ブロック（`AGE
 
 - `AGENTS.md` のローカルパートに `codex-review-inbox` が1つも残っていない。
 - `git grep -n "codex-review-inbox"` の結果が、`docs/history-archive/`・`docs/incidents/`・
-  同期管理下のファイル（`.ops-sync/sync-manifest.txt` に載っているもの）だけになっている。
+  同期管理下のファイル（`.ops-sync/sync-manifest.txt` に載っているもの）・**`.ops-sync/` の生成物**
+  だけになっている。生成物（旧名の `.ops-sync/codex-review-inbox.md`・`.ops-sync/codex-review-inbox-all.md`
+  と、新名ファイルの本文に残る旧名の記述）は workflow が次回実行で消す・書き換えるので**手で触らない**
+  （この作業中はまだ残っていることがある）。
 - 上記を含む PR を open にし、URL をユーザーに伝えてある。
 
 ## 消化

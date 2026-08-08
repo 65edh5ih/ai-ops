@@ -45,7 +45,8 @@
 //                     workflow_dispatch で大きい値を渡して1回流す。
 //   RI_REVIEWERS      在庫に載せるレビュー投稿者の login を空白/カンマ区切りで列挙する**絞り込み**。
 //                     **既定は空＝全員**（→ 冒頭「投稿者で選別しない」）。特定のレビュアーだけを見たい
-//                     ときの一時的な緊急弁として残してある。
+//                     ときの一時的な緊急弁として残してある。**author が読めないスレッドは絞り込み中も
+//                     載る**（列挙できない以上、弾くと絞り込みが fail-open の穴になる）。
 //
 // 出力:
 //   - <RI_OUT_ALL> … 全リポジトリ分。**リポジトリごとにグループ化**し、各グループにセッションへ貼る
@@ -79,8 +80,11 @@ const reviewerFilter = new Set(
 );
 // author が取れないスレッド（アカウント削除等）も**落とさない**。未 resolve であることは変わらず、
 // 落とすと「読めなかった」と「指摘が無い」が区別できなくなる（この一覧が防ぐはずの fail-open）。
+// **RI_REVIEWERS で絞っているときも例外**（login を列挙して絞る道具なので、読めない author は
+// そもそも列挙できない。ここで弾くと絞り込みが fail-open の穴になる）。
 const UNKNOWN_REVIEWER = '(unknown)';
-const acceptsReviewer = (login) => reviewerFilter.size === 0 || reviewerFilter.has(login);
+const acceptsReviewer = (login) =>
+  reviewerFilter.size === 0 || login === UNKNOWN_REVIEWER || reviewerFilter.has(login);
 
 // 壊れた値で走査範囲が 0 日になると「指摘ゼロ」を出してしまう（fail-open）ので、妥当でなければ既定に倒す。
 const rawLookback = process.env.RI_LOOKBACK_DAYS || '3';
@@ -192,10 +196,20 @@ async function graphql(query, variables) {
 // **`--` は「優先度なし」であって「低い」ではない**（表の注記でも同じことを言う）。並び順では未知扱いで
 // 最後に落ちるが、それは危険度の判定ではなく決定的な並びを作るための既定。
 // 見出しは「最初の太字」→無ければ「最初の非空行」の順に拾う（markdown の飾りは落とす）。
+//
+// 太字は**本文の先頭に限る**（`^`）。Codex は必ず太字ヘッダで始まるので従来どおり拾えるが、
+// 投稿者を問わなくなった今、地の文に `**強調**` を含むだけの指摘まで拾うと、そこが見出しとして
+// 表に出てしまう（例: 「… when **attempt** exceeds the max」→ 見出しが `attempt` になる）。
+// 先頭に太字が無ければ最初の非空行を使う。
 function parseFinding(body) {
   const priority = body.match(/!\[(P[0-9])\s+Badge\]/)?.[1] || '--';
-  const firstBold = body.match(/\*\*(?:<sub>|<\/sub>|!\[[^\]]*\]\([^)]*\))*\s*([^*]+?)\s*\*\*/);
-  const firstLine = (body.split('\n').find((l) => l.trim()) || '').replace(/^\s*[#>*\-\s]+/, '');
+  const firstBold = body.match(/^\s*\*\*(?:<sub>|<\/sub>|!\[[^\]]*\]\([^)]*\))*\s*([^*]+?)\s*\*\*/);
+  // 行頭の見出し・引用・箇条書きマーカーだけを落とし、強調は**中身を残して**記号だけ外す
+  // （`*` を一律に飾りとして削ると `*Note:* …` の開き側だけ消えて閉じ側が残る）。
+  const firstLine = (body.split('\n').find((l) => l.trim()) || '')
+    .replace(/^\s*(?:[#>]+\s*|[-*+]\s+)*/, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1');
   const title = (firstBold?.[1] || firstLine).replace(/\s+/g, ' ').trim();
   return { priority, title: title.slice(0, 160) };
 }
