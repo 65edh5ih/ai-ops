@@ -13,7 +13,7 @@
   "threshold_pct": 90,
   "projection_window_days": 7,
   "stale_after_hours": 24,
-  "checked_at": "2026-08-08T07:33:17Z",
+  "checked_at": "2026-08-08T13:30:29Z",
   "source": "cloudflare-api",
   "note": "measured from pages deployments and workers builds for the current month"
 }
