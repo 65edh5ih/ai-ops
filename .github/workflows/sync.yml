@@ -52,7 +52,7 @@ jobs:
       # **PR のゲートではない**（このリポジトリに `pull_request` 起点の CI は無く、この workflow は
       # main への push・cron・手動でしか走らない）。止められるのはマージではなく**配布**。
       # また `node --test` は `scripts/*.test.mjs` を**全部**走らせるので、配布に関係しない
-      # スクリプト（codex-review-inbox 等）のテストが落ちても配布は止まる（＝赤い main では
+      # スクリプト（review-inbox 等）のテストが落ちても配布は止まる（＝赤い main では
       # 配らない、が意図。cron の自己修復も同じ条件で止まる）。
       - name: Test all scripts (gates distribution)
         run: |

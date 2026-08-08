@@ -1,4 +1,5 @@
-// codex-review-inbox.mjs の分類（マージ済み／open／クローズ未マージ）と持ち越しの扱いを実駆動で確認する。
+// review-inbox.mjs の分類（マージ済み／open／クローズ未マージ）・持ち越し・**投稿者を問わず拾うこと**を
+// 実駆動で確認する。旧名（`codex-` 接頭辞）の生成物の後始末もここで見る。
 //
 // 実行: リポジトリルートで `node --test`（新旧の Node で拾い方が変わらない呼び方）
 //
@@ -6,7 +7,7 @@
 // GraphQL の応答を固定値で返す（ネットワーク・トークン不要）。
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -14,17 +15,18 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const script = path.join(root, 'scripts', 'codex-review-inbox.mjs');
+const script = path.join(root, 'scripts', 'review-inbox.mjs');
 
 const BOT = 'chatgpt-codex-connector';
+const OWNER = '65edh5ih'; // Claude Code の `/code-review --comment` はオーナー本人の login で投稿される
 const now = new Date().toISOString();
 
-function thread({ resolved = false, url } = {}) {
+function thread({ resolved = false, url, author = BOT, body = '**![P1 Badge](x) 直してほしい**' } = {}) {
   return {
     isResolved: resolved,
     isOutdated: false,
     comments: {
-      nodes: [{ author: { login: BOT }, createdAt: now, url, path: 'a.js', body: '**![P1 Badge](x) 直してほしい**' }],
+      nodes: [{ author: author === null ? null : { login: author }, createdAt: now, url, path: 'a.js', body }],
     },
   };
 }
@@ -56,13 +58,16 @@ const PRS = [
 // 持ち越しでだけ届く（直近スキャンには出さない）クローズ済み PR
 const CARRIED_ONLY = pr(9, { state: 'CLOSED', merged: false, threads: [thread({ url: 'https://x/#c9' })] });
 
-function run({ recentPrs = PRS, previousAll = null } = {}) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'cri-'));
-  const outAll = path.join(dir, 'clones', 'o', 'r', '.ops-sync', 'codex-review-inbox-all.md');
-  if (previousAll !== null) {
-    mkdirSync(path.dirname(outAll), { recursive: true });
-    writeFileSync(outAll, previousAll);
-  }
+function run({ recentPrs = PRS, previousAll = null, legacyAll = null, legacySlice = null, env = {} } = {}) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ri-'));
+  const sliceDir = path.join(dir, 'clones', 'o', 'r', '.ops-sync');
+  const outAll = path.join(sliceDir, 'review-inbox-all.md');
+  const legacyAllPath = path.join(sliceDir, 'codex-review-inbox-all.md');
+  const legacySlicePath = path.join(sliceDir, 'codex-review-inbox.md');
+  mkdirSync(sliceDir, { recursive: true });
+  if (previousAll !== null) writeFileSync(outAll, previousAll);
+  if (legacyAll !== null) writeFileSync(legacyAllPath, legacyAll);
+  if (legacySlice !== null) writeFileSync(legacySlicePath, legacySlice);
 
   const entry = path.join(dir, 'entry.mjs');
   writeFileSync(
@@ -85,19 +90,22 @@ function run({ recentPrs = PRS, previousAll = null } = {}) {
     encoding: 'utf8',
     env: {
       ...process.env,
-      CRI_TOKEN: 'x',
-      CRI_REPOS: 'o/r',
-      CRI_SLICE_REPOS: 'o/r',
-      CRI_CLONES: path.join(dir, 'clones'),
-      CRI_OUT_ALL: outAll,
+      RI_TOKEN: 'x',
+      RI_REPOS: 'o/r',
+      RI_SLICE_REPOS: 'o/r',
+      RI_CLONES: path.join(dir, 'clones'),
+      RI_OUT_ALL: outAll,
       GITHUB_OUTPUT: path.join(dir, 'gh-output'),
+      ...env,
     },
   });
   assert.equal(res.status, 0, res.stderr);
   return {
     stdout: res.stdout,
     all: readFileSync(outAll, 'utf8'),
-    slice: readFileSync(path.join(dir, 'clones', 'o', 'r', '.ops-sync', 'codex-review-inbox.md'), 'utf8'),
+    slice: readFileSync(path.join(sliceDir, 'review-inbox.md'), 'utf8'),
+    legacyAllExists: existsSync(legacyAllPath),
+    legacySliceExists: existsSync(legacySlicePath),
     outputs: Object.fromEntries(
       readFileSync(path.join(dir, 'gh-output'), 'utf8')
         .split('\n')
@@ -146,4 +154,82 @@ test('open / マージ済みは持ち越しで復活する（resolve される�
   assert.equal(outputs.open_findings, '2');
   assert.match(all, /\| 🔴 \|.*\[#1\]/);
   assert.match(all, /\| 🟡 \|.*\[#2\]/);
+});
+
+test('Codex 以外の投稿者（オーナー login＝Claude Code の経路）も在庫に載る', () => {
+  const { all, outputs } = run({
+    recentPrs: [
+      pr(1, {
+        state: 'MERGED',
+        merged: true,
+        threads: [thread({ url: 'https://x/#m1', author: OWNER, body: '### 二重に閉じている\n\n本文' })],
+      }),
+    ],
+  });
+
+  assert.equal(outputs.open_findings, '1');
+  assert.equal(outputs.merged_unresolved, '1');
+  // レビュアー列に投稿者が出る／優先度バッジが無いので `--`／見出しは最初の非空行から拾う
+  assert.match(all, new RegExp(`\\| 🔴 \\| -- \\| \\[#1\\]\\([^)]*\\) \\| ${OWNER} \\|`));
+  assert.match(all, /二重に閉じている/);
+});
+
+// 見出しの拾い方。Codex は必ず太字ヘッダで始まるが、投稿者を問わなくなったので
+// 「地の文に強調を含むだけ」の指摘が来る。そこを見出しに採ると表が読めなくなる。
+test('見出しは行頭の太字だけを採り、地の文の強調は採らない', () => {
+  const { all } = run({
+    recentPrs: [
+      pr(1, {
+        state: 'OPEN',
+        merged: false,
+        threads: [
+          thread({
+            url: 'https://x/#o1',
+            author: OWNER,
+            body: 'The retry loop never terminates when **attempt** exceeds the max.',
+          }),
+          thread({ url: 'https://x/#o2', author: OWNER, body: '*Note:* the guard was removed here' }),
+        ],
+      }),
+    ],
+  });
+
+  assert.match(all, /The retry loop never terminates when attempt exceeds the max\./);
+  assert.doesNotMatch(all, /\| attempt \|/); // 強調部分だけが見出しになっていない
+  assert.match(all, /Note: the guard was removed here/); // 開き側だけ消えて `Note:*` にならない
+});
+
+test('author が取れないスレッドも落とさない', () => {
+  const { all, outputs } = run({
+    recentPrs: [pr(2, { state: 'OPEN', merged: false, threads: [thread({ url: 'https://x/#o1', author: null })] })],
+  });
+
+  assert.equal(outputs.open_findings, '1');
+  assert.match(all, /\(unknown\)/);
+});
+
+test('RI_REVIEWERS を指定したときだけ投稿者で絞る', () => {
+  const recentPrs = [
+    pr(1, {
+      state: 'MERGED',
+      merged: true,
+      threads: [thread({ url: 'https://x/#m1', author: BOT }), thread({ url: 'https://x/#m2', author: OWNER })],
+    }),
+  ];
+
+  assert.equal(run({ recentPrs }).outputs.open_findings, '2');
+  assert.equal(run({ recentPrs, env: { RI_REVIEWERS: BOT } }).outputs.open_findings, '1');
+});
+
+test('旧名の生成物は消え、持ち越しは旧名からも読み戻される', () => {
+  // 改名の初回実行を模す: 新パスは無く、旧名の全体一覧に #1 と #2 が載っている
+  const res = run({
+    recentPrs: [],
+    legacyAll: '# 前回\n\nhttps://github.com/o/r/pull/1\nhttps://github.com/o/r/pull/2\n',
+    legacySlice: '# 前回のスライス\n',
+  });
+
+  assert.equal(res.outputs.open_findings, '2'); // 持ち越しが旧名から効いている
+  assert.equal(res.legacyAllExists, false);
+  assert.equal(res.legacySliceExists, false);
 });

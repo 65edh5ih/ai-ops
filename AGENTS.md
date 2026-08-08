@@ -64,18 +64,18 @@
 
 **配布に影響する変更**（`sync.yml` が同期 PR を生む入力: `shared/**`・`AGENTS_COMMON.md`・`sync-deletions.txt`。
 `tasks/**` は対象 consumer のみ）を含む PR がマージされると、`sync.yml` が各 consumer に同期 PR
-（head: `ops-sync/sync-common`）を生成し、**MERGE_MODE=direct なら数秒で自動マージ**される。Codex は**マージ後の
-同期 PR を数分後にレビューすることがあり**、ops-sync 本体の PR に出ず**consumer 同期 PR でだけ出る指摘**がある
+（head: `ops-sync/sync-common`）を生成し、**MERGE_MODE=direct なら数秒で自動マージ**される。レビューは**マージ後の
+同期 PR に数分後に付くことがあり**、ops-sync 本体の PR に出ず**consumer 同期 PR でだけ出る指摘**がある
 （例: net-fetch 配布時、注入・PEM・クエリの指摘が consumer 同期 PR でのみ出た）。取りこぼすと配布物の欠陥が全
 consumer に残る。
 
 - **上記の配布変更を含む PR を出したら、自分の PR を購読**（`subscribe_pr_activity`）し、**マージ後に consumer の
   最新同期 PR を確認する**。対象は `consumers.txt` の各 repo・head `ops-sync/sync-common` の**最新 PR**。
-  - 通常は `direct` で即マージされるので、**マージ済み同期 PR の Codex レビュー・CI を見る**（マージ後数分は
-    Codex レビューが付きうるので `send_later` 等で数分あけて見る）。
+  - 通常は `direct` で即マージされるので、**マージ済み同期 PR のレビュー・CI を見る**（マージ後数分は
+    レビューが付きうるので `send_later` 等で数分あけて見る）。
   - ただし branch protection・コンフリクト・権限などで **direct マージが失敗すると sync PR は open のまま残る**
     （`sync.yml` は失敗を握って PR を残す）。なので**マージ済み・open のどちらでも**最新の `ops-sync/sync-common`
-    PR を確認する（open なら現状の Codex/CI、そもそも未マージという事実自体が要対応）。
+    PR を確認する（open なら現状のレビュー/CI、そもそも未マージという事実自体が要対応）。
 - consumer は別リポジトリなので、確認には `add_repo`（read）が要る。エージェント起点で勝手に追加せず、
   **ユーザーに「`<owner>/<repo>` を追加して同期 PR を確認しますか？」と確認**してから追加する
   （AGENTS_COMMON「リポジトリ横断の作業」に従う。ユーザー不在の自律実行では確認できないので次回の同席時に）。
@@ -86,7 +86,7 @@ consumer に残る。
   **自動マージされた取り込み PR は扱うセッションも居ない**ので、この手順を行う人が居ない。自動マージの条件
   （提案元が private・ベース一致・常時層の増加が上限内）は「前提が変わっていないこと」しか見ておらず、
   **配布物としての正しさは見ていない**ため、条件を厳しくしても埋まらない。この経路は
-  `codex-review-inbox`（毎時・全リポジトリ横断）が受け持つ: consumer 同期 PR にだけ出た指摘も拾い、
+  `review-inbox`（毎時・全リポジトリ横断）が受け持つ: consumer 同期 PR にだけ出た指摘も拾い、
   **マージ済み PR に未 resolve で残っている指摘があれば run を失敗させる**（＝配布済みの欠陥に誰も
   着手していない状態を badge に出す）。赤が出たら一覧を読んで消化する（下記）。
 

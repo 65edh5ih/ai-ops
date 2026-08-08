@@ -43,7 +43,7 @@
 | consumer の `.ops-sync/outbox/*.md` | その consumer のエージェント |
 | 各リポジトリの `docs/history-inbox/<...>.md`（履歴フラグメント） | 新規1ファイル＝そのリポジトリのエージェント（既存ファイルには触れない） |
 | 各リポジトリの `docs/AI_TASK_HISTORY.md` | inbox の統合・アーカイブ移動とも ops-sync の archive CI（下記・保守バッチ）。エージェントは直接編集しない |
-| private consumer の `.ops-sync/codex-review-inbox.md`／private の `.ops-sync/codex-review-inbox-all.md` | ops-sync の codex-review-inbox CI（下記「Codex レビューの取りこぼし対策」）。人もエージェントも編集しない |
+| private consumer の `.ops-sync/review-inbox.md`／private の `.ops-sync/review-inbox-all.md` | ops-sync の review-inbox CI（下記「レビューの取りこぼし対策」）。人もエージェントも編集しない |
 
 ## 配布物の三層＋タスク
 
@@ -117,8 +117,8 @@ consumer へ伝播する（追加しかできない実装だと撤去がドリ�
 | `scripts/archive-task-history.mjs` | （保守）`docs/history-inbox/` のフラグメントを `docs/AI_TASK_HISTORY.md` へ統合し、保持量超過分を `docs/history-archive/` へ移す |
 | `.github/workflows/archive-task-history.yml` | （保守）cron（1日1回）で ops-sync＋全 consumer を巡回し、未統合フラグメントか超過エントリがあれば統合＋アーカイブ PR を生成・マージ。処理ログ（フラグメント名）は**対象リポジトリの `ci-logs`** へ、ops-sync には件数だけ |
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer から対象が消えた）を刈る |
-| `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から**未 resolve の Codex レビュースレッド**を集め、全体一覧＋**private consumer 分だけ**のスライスに落とす |
-| `.github/workflows/codex-review-inbox.yml` | （信号）cron（毎時）＋手動で上記を実行し、全体一覧を private の `.ops-sync/codex-review-inbox-all.md`、private consumer の自分の分を `.ops-sync/codex-review-inbox.md` へ直接 push（内容に変化があるときだけ）。public repo は全体一覧だけ |
+| `scripts/review-inbox.mjs` | （信号）全リポジトリの PR から**未 resolve のレビュースレッド**を**投稿者を問わず**集め、全体一覧＋**private consumer 分だけ**のスライスに落とす |
+| `.github/workflows/review-inbox.yml` | （信号）cron（毎時）＋手動で上記を実行し、全体一覧を private の `.ops-sync/review-inbox-all.md`、private consumer の自分の分を `.ops-sync/review-inbox.md` へ直接 push（内容に変化があるときだけ）。public repo は全体一覧だけ |
 | `.github/actions/create-pr-quiet/` | （内部）**他リポジトリへ commit する PR** の作成・更新。git 操作を `run:` の中で行い、出力を詳細ログへ逃がす（`peter-evans/create-pull-request` は変更ファイル名をジョブログへ流すため。下記「ログの公開先は『何についてのログか』で決める」）。ops-sync ローカルで consumer には配らない |
 | `shared/.github/actions/publish-ci-logs/` | （下り・ファイル）恒久ログ（`ci-logs` ブランチ）への publish。既定は実行リポジトリだが、`repository:` 入力で**他リポジトリの `ci-logs`** に出せる（下記「ログの公開先は『何についてのログか』で決める」） |
 | `shared/.github/actions/publish-ephemeral/` | （下り・ファイル）揮発ブランチへの publish。毎回 orphan 1コミットへ書き換え＋TTL 失効＋`--force-with-lease`。恒久ログ用の `publish-ci-logs` と対（下記「揮発する出力と恒久ログを分ける」） |
@@ -342,9 +342,9 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 > 即時性は不要なので cron ポーリングに変更し、consumer 側のトークン・workflow を全廃した。
 > ops-sync の main にはブランチ保護を掛けておくこと（PAT による直 push の防止）。
 
-## Codex レビューの取りこぼし対策（未対応在庫の一覧化）
+## レビューの取りこぼし対策（未対応在庫の一覧化）
 
-**この一覧が要る条件**: Codex のレビューは**同期 PR がマージされた数分後**に届くことがあり、そのとき
+**この一覧が要る条件**: レビューは**同期 PR がマージされた数分後**に届くことがあり、そのとき
 配布変更を出したセッションは終わっている。上り提案由来の取り込み PR には、そもそも提案元セッションが
 存在しない。加えて ops-sync 本体の PR には出ず**consumer 同期 PR にだけ出る指摘**があるため、気づくには
 全 consumer を見る必要がある。配布物（`shared/`）への指摘を取りこぼすと、欠陥が全 consumer に残る。
@@ -352,10 +352,18 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
 **ルールで埋まらない層がある**: ops-sync の `AGENTS.md`「配布変更のダウンストリーム確認」は、**セッションが
 生きている間**だけ機能する。届かない層は機械で埋める——ルールと一覧は代替でなく補完の関係にある。
 
-**しくみ**: `codex-review-inbox` workflow（cron 毎時＋手動）が全リポジトリ（consumer＋ops-sync 自身）の
-直近の PR を GraphQL で走査し、**未 resolve の Codex レビュースレッド**を集めて、下記2種類の markdown
+**しくみ**: `review-inbox` workflow（cron 毎時＋手動）が全リポジトリ（consumer＋ops-sync 自身）の
+直近の PR を GraphQL で走査し、**未 resolve のレビュースレッド**を集めて、下記2種類の markdown
 （全体一覧＋private consumer ごとのスライス）に書き出す。
 
+- **投稿者で選別しない**。在庫の原則（未 resolve のスレッド1本＝誰も見ていない欠陥1件）は投稿者に
+  依存しないうえ、**そもそも投稿者では分けられない**——専用の bot login を持つレビュアーもいれば、
+  セッションのトークンの identity（＝オーナー本人の login）で投稿されるレビューもあり、後者は人間の
+  コメントや PR 作成者と区別が付かない。許可リスト方式にすると、分離できない投稿者を「足したつもり」で
+  落とし続けることになる。レビュアーが増えてもコード変更が要らないのは、この判断の副次効果。
+  - **限界**: 集まるのは**GitHub のレビュースレッドになった指摘だけ**。セッション内に結果を返すだけの
+    レビューは resolve 状態を持たないので、この一覧には原理的に載らない（→ `AGENTS_COMMON.md`
+    「レビュー指摘は resolve までが1セット」で、その場で直しきらない指摘は投稿することを求めている）。
 - **状態を持たない**。「未 resolve のスレッド」そのものがキュー。直して resolve すれば次回実行で一覧から
   消える。別途の管理表を持たないので、一覧と実態がずれない。
 - **エントリが消える条件は「resolve された」だけ**（古くなったから、ではない。例外は下記の
@@ -380,25 +388,25 @@ apply-shared が全 consumer へ配布）で常に空でない状態に保つ: �
   ある**ので、黙って消さず**直近スキャンで見つけた分の件数だけ**注記に出す。注記は**持ち越しの対象外**で、
   窓から外れれば消える（単調増加しない）。reopen されれば `updatedAt` が動くので直近スキャンが拾い直す。
   - **「同じ変更が別 PR で `main` に入るなら、その PR にも同じ指摘が付く」は成り立たない**（＝注記を落として
-    完全ドロップにはできない）。Codex のレビューは PR 単位で、同じコードを載せた別の PR に必ず付くわけでは
+    完全ドロップにはできない）。レビューは PR 単位で、同じコードを載せた別の PR に必ず付くわけでは
     ないため、放棄された PR のスレッドが**その欠陥を指す唯一の文**になることがある。注記が埋めるのはこの穴で、
     頻度は低いが代替手段が無い。
 - **cron を回せるのは ops-sync が public だから**（GitHub-hosted runner が無料＝アカウントの Actions 枠を
   消費しない）。private リポジトリで同じことをすると枠を食う。**頻度は毎時**——実行分は無料でも、
   `*/15` のような高頻度スケジュールは GitHub 側で間引かれて発火しない（実測: 3枠連続で run が作られず、
   同時間帯の他 workflow は動いていた）。急ぐときは `workflow_dispatch` で即時に回す。
-- **直近スキャンの窓は狭く保つ**（既定3日）。役目は*新しい指摘の発見*だけで足りる——Codex は PR イベントの
-  数分後に投稿し、この workflow は毎時回る。一度載ったものは上記の持ち越しが resolve まで守る。
+- **直近スキャンの窓は狭く保つ**（既定3日）。役目は*新しい指摘の発見*だけで足りる——レビューは PR イベントの
+  数分後に届き、この workflow は毎時回る。一度載ったものは上記の持ち越しが resolve まで守る。
   窓を広げるほど GraphQL のレート（5,000ポイント/時）を食うため、過去分の洗い直しが要るときだけ
   `workflow_dispatch` の `lookback_days` に大きい値を入れて1回流す。
 
 **出力は2つ**（実行は public、成果物の可視性は置き場で分ける）:
 
-- **全体一覧** `.ops-sync/codex-review-inbox-all.md` … **private リポジトリにだけ**置く。全リポジトリ分を
+- **全体一覧** `.ops-sync/review-inbox-all.md` … **private リポジトリにだけ**置く。全リポジトリ分を
   **リポジトリごとにグループ化**し、各グループにそのリポジトリのセッションへ貼るコピペ用の依頼文を添える
   （人のトリアージ用。1本開けば全体が分かり、あとは貼るだけで各リポジトリに振れる）。
-- **リポジトリごとのスライス** `.ops-sync/codex-review-inbox.md` … **private consumer に自分の分だけ**。
-  全リポジトリで同じパスなので、共通ブロックの発火トリガを「このリポジトリの `.ops-sync/codex-review-inbox.md`
+- **リポジトリごとのスライス** `.ops-sync/review-inbox.md` … **private consumer に自分の分だけ**。
+  全リポジトリで同じパスなので、共通ブロックの発火トリガを「このリポジトリの `.ops-sync/review-inbox.md`
   を読め」の1文に固定できる（private consumer のセッションでは自分の積み残しを自力で読める）。public の
   `ops-sync` / `ops-runner` は走査対象には残すが、スライスを書かず private の全体一覧だけに載せる。
   workflow は public repo を書き込み先に含めないので、public repo にスライスは存在しない。
@@ -446,7 +454,7 @@ cron 専用で外部入力を取らないため残留する（枠はアカウン
 ## ログの公開先は「何についてのログか」で決める
 
 ops-sync は public なので、**その `ci-logs` に出したものは世界公開の恒久記録**になる（消しても履歴に残る）。
-一方 ops-sync の cross-repo バッチ（sync / collect-outbox / archive-task-history / codex-review-inbox）は
+一方 ops-sync の cross-repo バッチ（sync / collect-outbox / archive-task-history / review-inbox）は
 **private consumer の中身を読んで動く**。素直に「実行したリポジトリの `ci-logs`」に出すと、private の
 ファイル名・本文が public 側に落ちる。実際 `archive-task-history` は統合・削除したフラグメントのファイル名
 （＝private リポジトリのタスクスラッグ）を毎日 ops-sync の `ci-logs` に出していた。
@@ -463,7 +471,7 @@ ops-sync は public なので、**その `ci-logs` に出したものは世界�
   だから band しか出さない（→「Actions 月枠の信号」）。
 
 「宛先を1つの private リポジトリに寄せる」ではなく**対象リポジトリごとに散らす**のは、上の2点
-（可視性の自動一致・読み手と同一リポジトリ）が同時に満たせるのはこの形だけだから。Codex レビューの
+（可視性の自動一致・読み手と同一リポジトリ）が同時に満たせるのはこの形だけだから。レビューの
 全体一覧を private に寄せているのは、あれが**人が1本開いてトリアージする成果物**で、読み手も置き場も
 1つだから（性質が違う）。
 

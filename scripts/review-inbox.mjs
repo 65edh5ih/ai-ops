@@ -1,11 +1,19 @@
-// Codex レビュー指摘の「未対応在庫」を全リポジトリから集め、全体一覧＋リポジトリごとのスライスに落とす。
+// レビュー指摘の「未対応在庫」を全リポジトリから集め、全体一覧＋リポジトリごとのスライスに落とす。
 //
-// なぜ必要か: Codex のレビューは同期 PR がマージされた数分後に届くことがあり、そのとき配布変更を出した
+// なぜ必要か: レビューは同期 PR がマージされた数分後に届くことがあり、そのとき配布変更を出した
 // セッションは終わっている。ops-sync 本体の PR には出ず consumer 同期 PR にだけ出る指摘もあるため、
 // 気づくには全リポジトリを見る必要がある。配布物（shared/）への指摘を取りこぼすと欠陥が全 consumer に残る。
 //
 // 設計の要点:
-//   - **状態を持たない**。「未 resolve の Codex レビュースレッド」そのものがキュー。
+//   - **投稿者で選別しない**。未 resolve のレビュースレッドは、書いたのが誰であれ在庫に載せる。
+//     理由は2つ。①在庫の原則（未 resolve のスレッド1本＝誰も見ていない欠陥1件）は投稿者に依存しない。
+//     ②**そもそも投稿者では分けられない**——Codex は専用の bot login を持つが、Claude Code が
+//     `/code-review --comment` で投稿する指摘の author は**オーナー本人の login**（セッションのトークンの
+//     identity）で、人間が書いたコメントや PR 作成者と区別が付かない。許可リスト方式にすると、
+//     分離できない投稿者を「足したつもり」で落とし続けることになる。
+//     レビュアーが増えても（Copilot 等）コード変更なしで拾えるのも同じ理由による副次効果。
+//     絞りたいときだけ RI_REVIEWERS に login を列挙する（既定は全員）。
+//   - **状態を持たない**。「未 resolve のレビュースレッド」そのものがキュー。
 //     未対応 → 一覧に載る／対応して resolve → 次の run で消える。別途の管理表を持たないのでずれない。
 //   - **消える条件は「resolve された」だけ**。直近スキャンの窓から外れただけで消えないよう、前回の全体
 //     一覧に載っていた PR は名指しで再確認する（持ち越し）。前回の出力が持ち越しの入力を兼ねる。
@@ -22,25 +30,28 @@
 //     reopen されれば updatedAt が動くので直近スキャンが拾い直す。
 //
 // 入力（環境変数）:
-//   CRI_TOKEN          GitHub トークン（対象リポジトリの Pull requests: read が要る）
-//   CRI_REPOS          走査対象。`owner/repo` を改行か空白区切りで。`#` 以降はコメント
-//   CRI_CLONES         各リポジトリのクローンを置いたディレクトリ。スライスは
-//                      <CRI_CLONES>/<owner>/<repo>/.ops-sync/codex-review-inbox.md へ書く
-//   CRI_OUT_ALL        全体一覧の出力先パス（**private リポジトリのクローン内**）
-//   CRI_SLICE_REPOS    リポジトリ別スライスを書き出す対象。未指定なら CRI_REPOS 全件。
-//                      public repo の main を PR 必須で保護するときは除外し、全体一覧だけに載せる。
-//   CRI_LOOKBACK_DAYS  この日数より古い更新の PR は直近スキャンで見ない。既定 3
-//                      直近スキャンの役目は**新しい指摘の発見**だけでよい（Codex は PR イベントの数分後に
-//                      投稿し、この workflow は毎時回る）。一度載ったものは持ち越しが resolve まで
-//                      守るので、窓を広く取る必要はない。窓を広げるほど GraphQL のレート消費が増える
-//                      （nikki-san は30日で500 PR 超＝10ページ超）。過去分を洗い直したいときだけ
-//                      workflow_dispatch で大きい値を渡して1回流す。
-//   CRI_BOT            Codex のレビュー投稿者ログイン。既定 chatgpt-codex-connector
+//   RI_TOKEN          GitHub トークン（対象リポジトリの Pull requests: read が要る）
+//   RI_REPOS          走査対象。`owner/repo` を改行か空白区切りで。`#` 以降はコメント
+//   RI_CLONES         各リポジトリのクローンを置いたディレクトリ。スライスは
+//                     <RI_CLONES>/<owner>/<repo>/.ops-sync/review-inbox.md へ書く
+//   RI_OUT_ALL        全体一覧の出力先パス（**private リポジトリのクローン内**）
+//   RI_SLICE_REPOS    リポジトリ別スライスを書き出す対象。未指定なら RI_REPOS 全件。
+//                     public repo の main を PR 必須で保護するときは除外し、全体一覧だけに載せる。
+//   RI_LOOKBACK_DAYS  この日数より古い更新の PR は直近スキャンで見ない。既定 3
+//                     直近スキャンの役目は**新しい指摘の発見**だけでよい（レビューは PR イベントの数分後に
+//                     届き、この workflow は毎時回る）。一度載ったものは持ち越しが resolve まで
+//                     守るので、窓を広く取る必要はない。窓を広げるほど GraphQL のレート消費が増える
+//                     （PR の多い consumer は30日で500 PR 超＝10ページ超）。過去分を洗い直したいときだけ
+//                     workflow_dispatch で大きい値を渡して1回流す。
+//   RI_REVIEWERS      在庫に載せるレビュー投稿者の login を空白/カンマ区切りで列挙する**絞り込み**。
+//                     **既定は空＝全員**（→ 冒頭「投稿者で選別しない」）。特定のレビュアーだけを見たい
+//                     ときの一時的な緊急弁として残してある。**author が読めないスレッドは絞り込み中も
+//                     載る**（列挙できない以上、弾くと絞り込みが fail-open の穴になる）。
 //
 // 出力:
-//   - <CRI_OUT_ALL> … 全リポジトリ分。**リポジトリごとにグループ化**し、各グループにセッションへ貼る
+//   - <RI_OUT_ALL> … 全リポジトリ分。**リポジトリごとにグループ化**し、各グループにセッションへ貼る
 //     コピペ用の依頼文を添える。全リポジトリの内容が混ざるので private リポジトリにだけ置く。
-//   - CRI_SLICE_REPOS の `.ops-sync/codex-review-inbox.md` … **そのリポジトリの分だけ**。
+//   - RI_SLICE_REPOS の `.ops-sync/review-inbox.md` … **そのリポジトリの分だけ**。
 //     private consumer のエージェントが API アクセス無しで自分の積み残しを読める。public repo は
 //     PR 必須の main へ直接 push せず、private の全体一覧だけに載せる。
 //   - stdout のサマリ。**ops-sync の ci-logs（世界公開）に載るので、件数と repo 名しか出さない**
@@ -56,13 +67,27 @@
 const GRAPHQL = 'https://api.github.com/graphql';
 const MAX_PAGES = 20; // 直近スキャンのページ上限（1ページ50件）。cutoff に届く前の暴走を防ぐ安全弁
 
-const token = process.env.CRI_TOKEN || '';
-const clonesDir = process.env.CRI_CLONES || '';
-const outAll = process.env.CRI_OUT_ALL || '';
-const bot = process.env.CRI_BOT || 'chatgpt-codex-connector';
+const token = process.env.RI_TOKEN || '';
+const clonesDir = process.env.RI_CLONES || '';
+const outAll = process.env.RI_OUT_ALL || '';
+
+// 投稿者の絞り込み。**空＝全員**（既定）。→ 冒頭「投稿者で選別しない」
+const reviewerFilter = new Set(
+  (process.env.RI_REVIEWERS || '')
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+// author が取れないスレッド（アカウント削除等）も**落とさない**。未 resolve であることは変わらず、
+// 落とすと「読めなかった」と「指摘が無い」が区別できなくなる（この一覧が防ぐはずの fail-open）。
+// **RI_REVIEWERS で絞っているときも例外**（login を列挙して絞る道具なので、読めない author は
+// そもそも列挙できない。ここで弾くと絞り込みが fail-open の穴になる）。
+const UNKNOWN_REVIEWER = '(unknown)';
+const acceptsReviewer = (login) =>
+  reviewerFilter.size === 0 || login === UNKNOWN_REVIEWER || reviewerFilter.has(login);
 
 // 壊れた値で走査範囲が 0 日になると「指摘ゼロ」を出してしまう（fail-open）ので、妥当でなければ既定に倒す。
-const rawLookback = process.env.CRI_LOOKBACK_DAYS || '3';
+const rawLookback = process.env.RI_LOOKBACK_DAYS || '3';
 const parsedLookback = Number(rawLookback);
 const lookbackDays =
   Number.isFinite(parsedLookback) && parsedLookback >= 1 && parsedLookback <= 365 ? parsedLookback : 3;
@@ -71,14 +96,14 @@ const lookbackDays =
 // **行単位で先にコメントを落とす**（空白で分割してから `#` を弾くと、`# 計算基盤` のような
 // コメント行の2語目が repo 名として残る）。形が `owner/repo` でないものは無視する。
 const REPO_SHAPE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
-const repos = (process.env.CRI_REPOS || '')
+const repos = (process.env.RI_REPOS || '')
   .split(/\r?\n/)
   .map((line) => line.replace(/#.*$/, '').trim())
   .flatMap((line) => line.split(/[\s,]+/))
   .map((s) => s.trim())
   .filter((s) => REPO_SHAPE.test(s));
 const repoSet = new Set(repos);
-const sliceRepos = (process.env.CRI_SLICE_REPOS === undefined ? process.env.CRI_REPOS || '' : process.env.CRI_SLICE_REPOS)
+const sliceRepos = (process.env.RI_SLICE_REPOS === undefined ? process.env.RI_REPOS || '' : process.env.RI_SLICE_REPOS)
   .split(/\r?\n/)
   .map((line) => line.replace(/#.*$/, '').trim())
   .flatMap((line) => line.split(/[\s,]+/))
@@ -86,8 +111,14 @@ const sliceRepos = (process.env.CRI_SLICE_REPOS === undefined ? process.env.CRI_
   .filter((s) => REPO_SHAPE.test(s) && repoSet.has(s));
 const sliceRepoSet = new Set(sliceRepos);
 
-const { writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync } = await import('node:fs');
+const { writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync, unlinkSync } = await import('node:fs');
 const { dirname, join } = await import('node:path');
+
+// 旧名（`codex-` 接頭辞つき）の生成物。**この一覧は sync-manifest の管理下に無く、この workflow が
+// consumer の main へ直接 push している**ので、改名しても旧ファイルは消えずに残り続ける（新旧2つの
+// 在庫が並ぶ＝どちらが現行か読めない）。書き出しのたびに旧名を消して回る。
+const LEGACY_ALL_BASENAME = 'codex-review-inbox-all.md';
+const LEGACY_SLICE_BASENAME = 'codex-review-inbox.md';
 
 function setOutput(key, value) {
   const file = process.env.GITHUB_OUTPUT;
@@ -96,7 +127,7 @@ function setOutput(key, value) {
 }
 
 if (!token || !outAll || !clonesDir || repos.length === 0) {
-  console.log('codex-review-inbox: missing CRI_TOKEN / CRI_OUT_ALL / CRI_CLONES / CRI_REPOS; nothing to do');
+  console.log('review-inbox: missing RI_TOKEN / RI_OUT_ALL / RI_CLONES / RI_REPOS; nothing to do');
   setOutput('open_findings', '0');
   setOutput('files_changed', '0');
   process.exit(0);
@@ -146,7 +177,7 @@ async function graphql(query, variables) {
     headers: {
       authorization: `bearer ${token}`,
       'content-type': 'application/json',
-      'user-agent': 'ops-sync-codex-review-inbox',
+      'user-agent': 'ops-sync-review-inbox',
     },
     body: JSON.stringify({ query, variables }),
   });
@@ -159,12 +190,27 @@ async function graphql(query, variables) {
   return json.data.repository;
 }
 
-// Codex の指摘本文は `**<sub><sub>![P2 Badge](...)</sub></sub>  <見出し>**` で始まる。
 // 見出しと優先度だけ取り出す（本文全体は載せない——リンク先で読める）。
+//
+// 優先度バッジ `![P2 Badge](...)` は **Codex 固有の書式**。他のレビュアーの指摘には付かないので `--` になる。
+// **`--` は「優先度なし」であって「低い」ではない**（表の注記でも同じことを言う）。並び順では未知扱いで
+// 最後に落ちるが、それは危険度の判定ではなく決定的な並びを作るための既定。
+// 見出しは「最初の太字」→無ければ「最初の非空行」の順に拾う（markdown の飾りは落とす）。
+//
+// 太字は**本文の先頭に限る**（`^`）。Codex は必ず太字ヘッダで始まるので従来どおり拾えるが、
+// 投稿者を問わなくなった今、地の文に `**強調**` を含むだけの指摘まで拾うと、そこが見出しとして
+// 表に出てしまう（例: 「… when **attempt** exceeds the max」→ 見出しが `attempt` になる）。
+// 先頭に太字が無ければ最初の非空行を使う。
 function parseFinding(body) {
   const priority = body.match(/!\[(P[0-9])\s+Badge\]/)?.[1] || '--';
-  const firstBold = body.match(/\*\*(?:<sub>|<\/sub>|!\[[^\]]*\]\([^)]*\))*\s*([^*]+?)\s*\*\*/);
-  const title = (firstBold?.[1] || body.split('\n')[0] || '').replace(/\s+/g, ' ').trim();
+  const firstBold = body.match(/^\s*\*\*(?:<sub>|<\/sub>|!\[[^\]]*\]\([^)]*\))*\s*([^*]+?)\s*\*\*/);
+  // 行頭の見出し・引用・箇条書きマーカーだけを落とし、強調は**中身を残して**記号だけ外す
+  // （`*` を一律に飾りとして削ると `*Note:* …` の開き側だけ消えて閉じ側が残る）。
+  const firstLine = (body.split('\n').find((l) => l.trim()) || '')
+    .replace(/^\s*(?:[#>]+\s*|[-*+]\s+)*/, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1');
+  const title = (firstBold?.[1] || firstLine).replace(/\s+/g, ' ').trim();
   return { priority, title: title.slice(0, 160) };
 }
 
@@ -192,7 +238,7 @@ function loadCarriedPrs(path) {
   return [...out.values()];
 }
 
-// 1つの PR ノードから未 resolve な Codex 指摘を取り出す。
+// 1つの PR ノードから未 resolve なレビュー指摘を取り出す。
 // viaCarry: 持ち越し（前回の一覧に載っていたので名指しで再確認した）経由かどうか。
 function collectFromPr(repo, pr, viaCarry = false) {
   if (!pr) return 0;
@@ -205,7 +251,11 @@ function collectFromPr(repo, pr, viaCarry = false) {
     // 読み切れなかったスレッドも「取得失敗」にしない: 対象外の PR を読み残しても直す先が無く、
     // run を赤くしても誰も動けない（読み残しで赤くするのは在庫に載るクラスだけでよい）。
     const count = (pr.reviewThreads?.nodes || []).filter(
-      (th) => th && !th.isResolved && th.comments?.nodes?.[0]?.author?.login === bot,
+      (th) =>
+        th &&
+        !th.isResolved &&
+        th.comments?.nodes?.[0] &&
+        acceptsReviewer(th.comments.nodes[0].author?.login || UNKNOWN_REVIEWER),
     ).length;
     if (count) abandoned.push({ repo, pr: pr.number, url: pr.url, count });
     return 0;
@@ -224,12 +274,15 @@ function collectFromPr(repo, pr, viaCarry = false) {
   for (const th of pr.reviewThreads?.nodes || []) {
     if (!th || th.isResolved) continue;
     const c = th.comments?.nodes?.[0];
-    if (!c || c.author?.login !== bot) continue;
+    if (!c) continue;
+    const reviewer = c.author?.login || UNKNOWN_REVIEWER;
+    if (!acceptsReviewer(reviewer)) continue;
     const { priority, title } = parseFinding(c.body || '');
     findings.push({
       repo,
       pr: pr.number,
       prMerged: pr.merged,
+      reviewer,
       priority,
       title,
       path: c.path || '',
@@ -242,7 +295,9 @@ function collectFromPr(repo, pr, viaCarry = false) {
   return found;
 }
 
-const carried = loadCarriedPrs(outAll);
+// 改名の初回実行では新パスがまだ無い。旧名から読み戻さないと**持ち越しが1回だけ全滅**し、
+// 「窓の外に出ただけの未 resolve」が静かに在庫から消える（resolve されたから消える、が崩れる）。
+const carried = loadCarriedPrs(existsSync(outAll) ? outAll : join(dirname(outAll), LEGACY_ALL_BASENAME));
 
 for (const repo of repos) {
   const [owner, name] = repo.split('/');
@@ -326,10 +381,10 @@ const esc = (s) => String(s).replace(/\|/g, '\\|');
 
 function headerLines(scope) {
   return [
-    `# Codex レビューの未対応在庫${scope}`,
+    `# レビューの未対応在庫${scope}`,
     '',
-    'ops-sync の `codex-review-inbox` workflow が生成する。**手で編集しない**（次回実行で上書きされる）。',
-    '生成元: `ops-sync/scripts/codex-review-inbox.mjs`。',
+    'ops-sync の `review-inbox` workflow が生成する。**手で編集しない**（次回実行で上書きされる）。',
+    '生成元: `ops-sync/scripts/review-inbox.mjs`。**投稿者を問わず**未 resolve のレビュースレッドを全部載せる。',
     '',
     '**この一覧は GitHub の resolve 状態そのもの**なので、別途の管理表は無い:',
     '',
@@ -344,15 +399,19 @@ function headerLines(scope) {
 }
 
 function tableLines(items) {
-  const out = ['| | 優先 | PR | ファイル | 指摘 | 経過 |', '|---|---|---|---|---|---|'];
+  const out = ['| | 優先 | PR | レビュアー | ファイル | 指摘 | 経過 |', '|---|---|---|---|---|---|---|'];
   for (const f of items) {
     out.push(
-      `| ${f.prMerged ? '🔴' : '🟡'} | ${f.priority} | [#${f.pr}](${f.url}) | \`${esc(f.path || '—')}\` |` +
-        ` ${esc(f.title)}${f.isOutdated ? ' _(outdated)_' : ''} | ${daysAgo(f.createdAt)}日 |`,
+      `| ${f.prMerged ? '🔴' : '🟡'} | ${f.priority} | [#${f.pr}](${f.url}) | ${esc(f.reviewer)} |` +
+        ` \`${esc(f.path || '—')}\` | ${esc(f.title)}${f.isOutdated ? ' _(outdated)_' : ''} | ${daysAgo(f.createdAt)}日 |`,
     );
   }
   out.push('');
   out.push('🔴 = マージ済み PR の未 resolve（配布物なら全 consumer に欠陥が残っている状態＝最優先）／🟡 = open PR。');
+  out.push(
+    '優先度 `--` は**優先度なし**（低い、ではない）。`P1`〜`P3` のバッジは Codex 固有の書式で、' +
+      '他のレビュアーの指摘には付かない。',
+  );
   out.push('');
   return out;
 }
@@ -421,6 +480,16 @@ function writeIfChanged(path, bodyLines) {
   return true;
 }
 
+// 旧名の生成物を消す（→ LEGACY_* 定義のコメント）。消した分も filesChanged に数える——
+// 数えないと「内容に変化なし」で commit ステップごと飛ばされ、旧ファイルが consumer に残り続ける。
+function removeLegacy(dir, basename) {
+  const path = join(dir, basename);
+  if (!existsSync(path)) return false;
+  unlinkSync(path);
+  filesChanged++;
+  return true;
+}
+
 // ── 全体一覧（private にだけ置く。リポジトリごとにグループ化＋コピペ用の依頼文つき）────────────
 const mergedCount = findings.filter((f) => f.prMerged).length;
 const all = [...headerLines('（全リポジトリ）')];
@@ -429,7 +498,7 @@ all.push(...failureLines(failures));
 all.push(`## 未対応 ${findings.length} 件`);
 all.push('');
 if (findings.length === 0) {
-  all.push('未 resolve の Codex 指摘はありません。');
+  all.push('未 resolve のレビュー指摘はありません。');
   all.push('');
 } else {
   if (mergedCount > 0) {
@@ -446,10 +515,10 @@ if (findings.length === 0) {
     all.push('そのリポジトリのセッションに貼る依頼文:');
     all.push('');
     all.push('```');
-    all.push(`${short} の Codex 指摘の積み残しを消化する`);
+    all.push(`${short} のレビュー指摘の積み残しを消化する`);
     all.push(
       sliceRepoSet.has(repo)
-        ? '`.ops-sync/codex-review-inbox.md` にこのリポジトリ分の未対応一覧があります。' +
+        ? '`.ops-sync/review-inbox.md` にこのリポジトリ分の未対応一覧があります。' +
             '読んで対応し、直したらレビュースレッドを resolve してください。'
         : 'public repo は main を PR 必須で保護しているためリポジトリ内スライスを置きません。' +
             'この全体一覧の当該セクションを確認して対応し、直したらレビュースレッドを resolve してください。',
@@ -463,12 +532,13 @@ all.push(...abandonedLines(abandoned));
 all.push(
   ...footerLines([
     'private の対象リポジトリには**そのリポジトリの分だけ**を抜き出した ' +
-      '`.ops-sync/codex-review-inbox.md` も置いてある。public repo は main を PR 必須で保護するため、',
+      '`.ops-sync/review-inbox.md` も置いてある。public repo は main を PR 必須で保護するため、',
     '直接 push するスライスを置かず、この全体一覧だけに載せる。この全体一覧はここにしか無い。',
     '',
   ]),
 );
 writeIfChanged(outAll, all);
+removeLegacy(dirname(outAll), LEGACY_ALL_BASENAME);
 
 // ── リポジトリごとのスライス（指定された private consumer の .ops-sync/ に置く）─────────────
 for (const repo of sliceRepos) {
@@ -481,14 +551,16 @@ for (const repo of sliceRepos) {
   lines.push(`## 未対応 ${mine.length} 件`);
   lines.push('');
   if (mine.length === 0) {
-    lines.push('このリポジトリに未 resolve の Codex 指摘はありません。');
+    lines.push('このリポジトリに未 resolve のレビュー指摘はありません。');
     lines.push('');
   } else {
     lines.push(...tableLines(mine));
   }
   lines.push(...abandonedLines(abandoned.filter((a) => a.repo === repo)));
   lines.push(...footerLines([`これは \`${repo}\` の分だけを抜き出したもの。全リポジトリ分の一覧は別にある。`, '']));
-  writeIfChanged(join(clonesDir, repo, '.ops-sync', 'codex-review-inbox.md'), lines);
+  const sliceDir = join(clonesDir, repo, '.ops-sync');
+  writeIfChanged(join(sliceDir, 'review-inbox.md'), lines);
+  removeLegacy(sliceDir, LEGACY_SLICE_BASENAME);
 }
 
 console.log(
