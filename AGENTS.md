@@ -13,6 +13,7 @@
   **consumer のパスをミラーして**置く（例: `shared/.github/actions/<name>/action.yml`）。
 - **`shared/` からファイルを撤去・改名する** → 消すだけでよい（manifest 差分で consumer からも消える）。
   manifest 導入前から consumer にあるファイルの撤去だけ `sync-deletions.txt` に旧パスを追記する。
+  ただし**配布 doc（`shared/docs/*.md`）の改名・移動だけは追加でやることがある** → 下記「完了手順」。
 - **別リポジトリに作業を依頼する** → `tasks/<owner>/<repo>/<時刻>-<説明>.md` を置く
   （書き方: [`shared/docs/cross-repo-tasks.md`](shared/docs/cross-repo-tasks.md)）。消化はファイル削除。
 - **配布先を増やす** → `consumers.txt` に `owner/repo` を追記し、`OPS_SYNC_TOKEN`（PAT）のアクセス対象にも追加。
@@ -49,9 +50,15 @@
   （設計と実装を乖離させない）。
 - `consumers.txt` を変えたら PAT のアクセス対象も合わせる。
 - **配布 doc を改名・移動したら、consumer 側のローカルな参照を直す依頼（`tasks/`）を同じ PR で出す**。
-  manifest 差分で追随するのは consumer の `docs/` と skills ミラー**だけ**で、各 consumer の
-  **ローカル doc・コード内コメント・README からの参照は自動では直らない**（旧名のまま残ってリンク切れになる）。
-  ops-sync 内の参照（`AGENTS_COMMON.md`・`shared/docs/*` の相互リンク・`docs/` の symlink）は自分で直す。
+  manifest 差分で追随するのは**配布したファイルそのもの**（consumer の `docs/<name>.md`・skills ミラー）
+  **だけ**で、各 consumer の**ローカル doc・コード内コメント・README からの参照は自動では直らない**
+  （旧名のまま残ってリンク切れになる）。ops-sync 内では次を自分で直す（**全部数える**）:
+  - **skill ラッパー `shared/.claude/skills/<name>/`** — ディレクトリ名と、SKILL.md 本文の
+    `docs/<name>.md` ポインタの両方（改名しても manifest は追随しない。直さないと全 consumer の
+    skill 7パス＝正本＋自動生成ミラー6が、存在しないパスを指したまま発火する）。
+  - `AGENTS_COMMON.md` の発火トリガ行・`shared/docs/*` の相互リンク・`docs/` の symlink。
+  - **`README.md` と `shared/docs/ops-sync-design.md`**（doc 名をファイル名で列挙している。上の
+    「仕組みを変えたら両方更新する」と同じ）。
 
 ## 配布変更のダウンストリーム確認（shared/ を触ったら下流も見る）
 
