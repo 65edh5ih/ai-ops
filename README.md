@@ -55,8 +55,8 @@ Qwen Code / Antigravity は `AGENTS.md` をネイティブに読む（Qwen は�
 | `scripts/prune-tombstones.mjs` | （保守）`sync-deletions.txt` の役目を終えた行（全 consumer で削除済み）を自動で刈る |
 | `scripts/actions-quota.mjs` | （信号）billing API で Actions 月枠の使用率を測り、`ok`/`tight`/`exhausted`/`unknown` の粗い state に落とす |
 | `.github/workflows/actions-quota.yml` | （信号）cron（6時間ごと）で上記を実行し `ci-logs` の `quota/actions/actions.json` へ publish。エージェントが private repo で workflow を回してよいかの判断に使う（手順: `shared/docs/actions-quota.md`） |
-| `scripts/codex-review-inbox.mjs` | （信号）全リポジトリの PR から未 resolve の Codex レビュースレッドを集め、全体一覧＋リポジトリごとのスライスに落とす |
-| `.github/workflows/codex-review-inbox.yml` | （信号）cron（毎時）＋手動で上記を実行し、全体一覧を private の `.ops-sync/codex-review-inbox-all.md`、private consumer の自分の分を `.ops-sync/codex-review-inbox.md` へ push（変化があるときだけ）。public repo は全体一覧だけ |
+| `scripts/review-inbox.mjs` | （信号）全リポジトリの PR から未 resolve のレビュースレッドを**投稿者を問わず**集め、全体一覧＋リポジトリごとのスライスに落とす |
+| `.github/workflows/review-inbox.yml` | （信号）cron（毎時）＋手動で上記を実行し、全体一覧を private の `.ops-sync/review-inbox-all.md`、private consumer の自分の分を `.ops-sync/review-inbox.md` へ push（変化があるときだけ）。public repo は全体一覧だけ |
 | `scripts/deploy-route-reconcile.mjs` | （信号）GitHub と CF の枠 state から「どちらの経路でデプロイすべきか」を決め、`decision.json` に落とす（切替そのものは行わない） |
 | `.github/workflows/deploy-route-reconcile.yml` | （信号）cron（6時間ごと）＋手動で上記を実行し `ci-logs` の `deploy-route/decision.json` へ publish。consumer 側がこの URL を読んで経路を合わせる（`<name>/latest` にしないのは、consumer が URL 直打ちで取りに来る配布物のため） |
 | `scripts/cloudflare-quota.mjs` | （信号）CF の月枠（Pages のビルド回数・Workers Builds の分数）を測り、使用率と**直近レートによる月末予測**の両方で band を出す |
@@ -157,27 +157,29 @@ consumer 側のセットアップは**不要**（workflow・Secret とも置か�
   （正本 `shared/docs/history-inbox/README.md`）で常設し、全フラグメント統合後もディレクトリが消えないようにする。
 - **同期PRのマージ**: `sync.yml` の `MERGE_MODE` で選ぶ。`direct`（即マージ・完全自動）/
   `auto`（GitHub auto-merge。consumer に branch protection＋required checks が必要）/ `off`（手動）。
-  現在は `direct`（内容レビューは ops-sync のマージ時に済んでいる、という設計）。ただし **Codex は
-  マージ後の consumer 同期 PR を数分後にレビューすることがあり**、ops-sync 本体 PR に出ない指摘が出うる。
-  **配布に影響する変更をマージしたら下流の同期 PR の Codex/CI を確認する**（対象の入力範囲・手順とも
+  現在は `direct`（内容レビューは ops-sync のマージ時に済んでいる、という設計）。ただし **レビューは
+  マージ後の consumer 同期 PR に数分後に付くことがあり**、ops-sync 本体 PR に出ない指摘が出うる。
+  **配布に影響する変更をマージしたら下流の同期 PR のレビュー/CI を確認する**（対象の入力範囲・手順とも
   正本は `AGENTS.md`「配布変更のダウンストリーム確認」。scope をここに列挙しないのは AGENTS.md と二重化して
   ドリフトさせないため）。
 - **ドリフトの自己修復**: sync は main の変更時に加えて cron（1日1回）でも全 consumer へ再適用する。
   consumer 側でマーカー区間や配布ファイルが手編集されても、翌日までに同期PRで正本へ戻る
   （差分が無ければ何も起きない）。
-- **Codex レビューの未対応在庫を見る**: 上の「マージ後の同期 PR を確認する」はセッションが生きている
-  間しか効かない（指摘はセッション終了後に届く）。取りこぼしの受け皿として *Codex review inbox*
-  workflow（cron 毎時＋手動）が全リポジトリの**未 resolve な Codex レビュースレッド**を集め、
-  private リポジトリの **`.ops-sync/codex-review-inbox-all.md`**（全リポジトリ分・リポジトリごとに
+- **レビューの未対応在庫を見る**: 上の「マージ後の同期 PR を確認する」はセッションが生きている
+  間しか効かない（指摘はセッション終了後に届く）。取りこぼしの受け皿として *Review inbox*
+  workflow（cron 毎時＋手動）が全リポジトリの**未 resolve なレビュースレッド**を**投稿者を問わず**集め、
+  private リポジトリの **`.ops-sync/review-inbox-all.md`**（全リポジトリ分・リポジトリごとに
   グループ化＋セッションに貼るコピペ用の依頼文つき）と、**private consumer の
-  `.ops-sync/codex-review-inbox.md`**（そのリポジトリの分だけ）に書き出す。public の ops-sync / ops-runner は
+  `.ops-sync/review-inbox.md`**（そのリポジトリの分だけ）に書き出す。public の ops-sync / ops-runner は
   PR 必須の `main` へ直接 push せず、走査結果を全体一覧だけに載せる。
   **一覧に載る＝未対応**で、直してスレッドを resolve すれば次回実行で消える（別途の管理表は無い）。
   **マージされずクローズされた PR の指摘は在庫に載せない**（`main` に入っていないので直す先が無い）。
   黙って消さずに件数だけ末尾の注記に出す。
   メール通知を1件ずつ辿る代わりにこのファイルを見る。新しい secret は不要（`OPS_SYNC_TOKEN` の
   Pull requests 権限で読む）。仕組みと置き場の理由は
-  `shared/docs/ops-sync-design.md`「Codex レビューの取りこぼし対策」。
+  `shared/docs/ops-sync-design.md`「レビューの取りこぼし対策」。
+  **GitHub のスレッドとして投稿されていない指摘は集まらない**（既定の `/code-review` は結果を
+  セッション内に返すだけ）。→ `AGENTS_COMMON.md`「レビュー指摘は resolve までが1セット」。
   **在庫を消化する側の手順**（着手の順序・修正範囲・周回の止め方・スレッドの決着）は
   `shared/docs/review-threads.md`（consumer では `docs/review-threads.md`）。
 
