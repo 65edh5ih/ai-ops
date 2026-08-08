@@ -178,6 +178,8 @@ consumer 側のセットアップは**不要**（workflow・Secret とも置か�
   メール通知を1件ずつ辿る代わりにこのファイルを見る。新しい secret は不要（`OPS_SYNC_TOKEN` の
   Pull requests 権限で読む）。仕組みと置き場の理由は
   `shared/docs/ops-sync-design.md`「Codex レビューの取りこぼし対策」。
+  **在庫を消化する側の手順**（着手の順序・修正範囲・周回の止め方・スレッドの決着）は
+  `shared/docs/review-threads.md`（consumer では `docs/review-threads.md`）。
 
 ### 上り（consumer 起点で共通ルール・ファイルを直す／作業を依頼する）
 
