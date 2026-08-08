@@ -48,6 +48,10 @@
 - 仕組み（スクリプト・workflow・配布対象）を変えたら、**`shared/docs/ops-sync-design.md` と `README.md` の該当箇所も更新する**
   （設計と実装を乖離させない）。
 - `consumers.txt` を変えたら PAT のアクセス対象も合わせる。
+- **配布 doc を改名・移動したら、consumer 側のローカルな参照を直す依頼（`tasks/`）を同じ PR で出す**。
+  manifest 差分で追随するのは consumer の `docs/` と skills ミラー**だけ**で、各 consumer の
+  **ローカル doc・コード内コメント・README からの参照は自動では直らない**（旧名のまま残ってリンク切れになる）。
+  ops-sync 内の参照（`AGENTS_COMMON.md`・`shared/docs/*` の相互リンク・`docs/` の symlink）は自分で直す。
 
 ## 配布変更のダウンストリーム確認（shared/ を触ったら下流も見る）
 
