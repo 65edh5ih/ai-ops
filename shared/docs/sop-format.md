@@ -109,12 +109,14 @@
 - `.openhands/skills/<name>/SKILL.md`（OpenHands V1）
 - `.gemini/skills/<name>/SKILL.md`（Gemini CLI。AGENTS.md 本体は `GEMINI.md -> AGENTS.md` 入口 symlink で読む）
 - `.agents/skills/<name>/SKILL.md`（Antigravity）
+- `.qwen/skills/<name>/SKILL.md`（Qwen Code）
+- `.cline/skills/<name>/SKILL.md`（Cline。常時ルールは `.clinerules/` で受け、SOP はここで拾う）
 
 ラッパーは「`docs/<name>.md` を読んで従え」の薄いポインタで、frontmatter の `description` が発火トリガ。
 **SKILL.md に手順本体を書かない**（正本は常に `docs/` 側。二重管理にしない）。配布物なので手編集しない
 （直したいときは → `docs/outbox-proposal.md` の経路で正本を直す）。
 
-`.claude/skills/` 以外の4パスは、ops-sync の配布スクリプトが正本 `.claude/skills/` から**配布時に
+`.claude/skills/` 以外の6パスは、ops-sync の配布スクリプトが正本 `.claude/skills/` から**配布時に
 自動生成**する。共通 SOP に skill ラッパーを添えるときに書く（提案する）のは
 `shared/.claude/skills/<name>/SKILL.md` の1ファイルだけ（ミラーを手で作らない。MUST NOT）。
 

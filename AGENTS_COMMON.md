@@ -129,7 +129,9 @@ URL を推測で組み立てたときはその旨を添える。
 
 - **push 前に、その PR がマージ済み/クローズ済みでないか必ず確認する**。正本は PR の実マージ状態
   （`merged`/`state`）。`git log origin/main..HEAD` は squash merge を検出できない。
-  マージ済み/クローズ済みなら push せず、最新の `main` から新ブランチを切り直す。
+  マージ済み/クローズ済みなら push せず、最新の `main` から新ブランチを切り直す。**ただしクローズ済みは
+  切り直す前に close コメントを読む**——引き継ぎ先が書かれていれば別スレッドが続きを進めているので、
+  切り直しも reopen もせず、ユーザーに伝えて指示を仰ぐ（→ [`docs/agent-handoff.md`](docs/agent-handoff.md)）。
   （`.githooks/pre-push` が「今セッションで再 push」のときこの確認を促すリマインドを出す。仕組み・
   限界は [`docs/merged-branch-guard.md`](docs/merged-branch-guard.md)。）
   - この確認は**無条件**。「直前に自分が push したばかり」「指摘を受けて直しただけ」は
