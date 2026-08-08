@@ -1,10 +1,12 @@
-name: Codex review inbox
+name: Review inbox
 
-# Codex レビューの「未 resolve な指摘」を全リポジトリから集め、2種類の一覧に落とす。
+# レビューの「未 resolve な指摘」を全リポジトリから集め、2種類の一覧に落とす。**投稿者は問わない**
+# （理由はスクリプト冒頭「投稿者で選別しない」。要は Claude Code の指摘はオーナー本人の login で
+# 投稿されるため、レビュアーの許可リストでは分離できない）。
 #
-# なぜ必要か: Codex の指摘は同期 PR のマージ後に届くことがあり、そのとき配布変更を出したセッションは
+# なぜ必要か: 指摘は同期 PR のマージ後に届くことがあり、そのとき配布変更を出したセッションは
 # 終わっている。ops-sync 本体の PR には出ず consumer 同期 PR にだけ出る指摘もある。配布物（shared/）への
-# 指摘を取りこぼすと欠陥が全 consumer に残る。→ shared/docs/ops-sync-design.md「Codex レビューの取りこぼし対策」
+# 指摘を取りこぼすと欠陥が全 consumer に残る。→ shared/docs/ops-sync-design.md「レビューの取りこぼし対策」
 #
 # **ops-sync でだけ動かす**（shared/ に置かず consumer へ配布しない）。理由:
 #   - 走査は全リポジトリ横断なので1箇所でよい。
@@ -16,7 +18,7 @@ name: Codex review inbox
 #   - **全体一覧** … 全リポジトリ分をリポジトリごとにグループ化し、セッションに貼るコピペ用の依頼文を
 #     添える。全リポジトリの内容が混ざるので **private リポジトリにだけ**置く（ops-sync は世界公開なので
 #     ここには置けない。MUST NOT）。人がトリアージに使う。
-#   - **リポジトリごとのスライス** … private consumer の `.ops-sync/codex-review-inbox.md` に自分の分だけ。
+#   - **リポジトリごとのスライス** … private consumer の `.ops-sync/review-inbox.md` に自分の分だけ。
 #     どのエージェントでも自分の作業リポジトリで読める（issue は GitHub API アクセスが要る＝ランタイム
 #     依存になるので使わない。`.ops-sync/tasks/` と同じ「物理的に届ける」作法）。public の ops-sync / ops-runner
 #     は main を PR 必須で保護するため直接 push せず、private の全体一覧だけに載せる。
@@ -29,7 +31,7 @@ on:
     # **毎時**。実行分は無料（public リポジトリ）なので頻度のコストは無いが、`*/15` は GitHub 側で
     # 間引かれて**1度も発火しなかった**（12:00/12:15/12:30 の3枠連続で run が作られず、同時間帯の
     # sync は動いていたのでアカウント側の問題ではない）。高頻度スケジュールほど優先度を落とされるため、
-    # 確実に回る頻度に下げる。Codex の指摘はマージの2〜3分後に付くので、実効の気づきは60〜90分。
+    # 確実に回る頻度に下げる。指摘はマージの2〜3分後に付くので、実効の気づきは60〜90分。
     # 急ぐときは workflow_dispatch で即時に回せる。
     - cron: '0 * * * *'
   workflow_dispatch:
@@ -43,7 +45,7 @@ permissions:
   contents: write # publish-ci-logs が ops-sync の ci-logs ブランチへ push するのに必要
 
 concurrency:
-  group: codex-review-inbox
+  group: review-inbox
   cancel-in-progress: false
 
 jobs:
@@ -52,11 +54,13 @@ jobs:
     env:
       # 全体一覧の置き場（private リポジトリ）。repo variable で移せるようにしておく。
       # **全リポジトリの内容が混ざるので private 限定**（ops-sync・ops-runner は public）。
-      INBOX_ALL_REPO: ${{ vars.CODEX_INBOX_REPO || '65edh5ih/private' }}
-      INBOX_ALL_PATH: .ops-sync/codex-review-inbox-all.md
+      # 旧名 CODEX_INBOX_REPO も読む: 変数の張り替えが済むまでの間に既定値へ黙って落ちると、
+      # 全リポジトリ分の一覧が意図しないリポジトリへ push される。
+      INBOX_ALL_REPO: ${{ vars.REVIEW_INBOX_REPO || vars.CODEX_INBOX_REPO || '65edh5ih/private' }}
+      INBOX_ALL_PATH: .ops-sync/review-inbox-all.md
       # 各リポジトリに置く「自分の分だけ」のスライス。全リポジトリで同じパスにする
-      # （エージェントへの指示を「`.ops-sync/codex-review-inbox.md` を読め」の1文に固定できる）。
-      SLICE_PATH: .ops-sync/codex-review-inbox.md
+      # （エージェントへの指示を「`.ops-sync/review-inbox.md` を読め」の1文に固定できる）。
+      SLICE_PATH: .ops-sync/review-inbox.md
     steps:
       - name: Checkout ops-sync
         uses: actions/checkout@v5
@@ -87,14 +91,15 @@ jobs:
           done < /tmp/target-repos.txt
 
       - id: collect
-        name: Collect unresolved Codex findings
+        name: Collect unresolved review findings
         env:
-          CRI_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
-          CRI_CLONES: clones
-          CRI_OUT_ALL: clones/${{ vars.CODEX_INBOX_REPO || '65edh5ih/private' }}/.ops-sync/codex-review-inbox-all.md
+          RI_TOKEN: ${{ secrets.OPS_SYNC_TOKEN }}
+          RI_CLONES: clones
+          # 置き場は上の INBOX_ALL_REPO / INBOX_ALL_PATH が正本（値を2箇所に複製しない）
+          RI_OUT_ALL: clones/${{ env.INBOX_ALL_REPO }}/${{ env.INBOX_ALL_PATH }}
           # 手動実行の入力 > repo variable > スクリプト既定（3日）の順。窓を広げるほど GraphQL の
           # レートを食うので、常用は狭く保ち、過去分の洗い直しだけ dispatch で大きくする。
-          CRI_LOOKBACK_DAYS: ${{ inputs.lookback_days || vars.CODEX_INBOX_LOOKBACK_DAYS || '' }}
+          RI_LOOKBACK_DAYS: ${{ inputs.lookback_days || vars.REVIEW_INBOX_LOOKBACK_DAYS || vars.CODEX_INBOX_LOOKBACK_DAYS || '' }}
         # 走査対象は consumer 全部＋ops-sync 自身（ops-sync 本体の PR にも指摘は付く）。
         #
         # ログは docs/ci-logs.md 手順A-2 のとおり logs/ci/scripts/<name>.log へ残す。
@@ -103,9 +108,9 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p logs/ci/scripts
-          CRI_REPOS="$(cat /tmp/target-repos.txt)" \
-            CRI_SLICE_REPOS="$(cat /tmp/slice-repos.txt)" \
-            node ops-sync/scripts/codex-review-inbox.mjs 2>&1 | tee logs/ci/scripts/codex-review-inbox.log
+          RI_REPOS="$(cat /tmp/target-repos.txt)" \
+            RI_SLICE_REPOS="$(cat /tmp/slice-repos.txt)" \
+            node ops-sync/scripts/review-inbox.mjs 2>&1 | tee logs/ci/scripts/review-inbox.log
 
       - name: Commit and push changed inventories
         if: steps.collect.outputs.files_changed != '0'
@@ -134,18 +139,23 @@ jobs:
               git -C "$d" add -A -- .ops-sync
               # 差分ゼロなら空コミットで履歴を汚さない（再取得の結果、既に同じ内容だった場合も含む）
               if git -C "$d" diff --cached --quiet; then pushed=1; break; fi
-              git -C "$d" commit -q -m "chore(codex-inbox): 未対応 ${OPEN} 件（マージ済み ${MERGED} 件）"
+              git -C "$d" commit -q -m "chore(review-inbox): 未対応 ${OPEN} 件（マージ済み ${MERGED} 件）"
               if git -C "$d" push origin HEAD:main 2>/dev/null; then pushed=1; break; fi
-              echo "codex-inbox: push attempt ${attempt} failed for ${repo}; refreshing main..."
+              echo "review-inbox: push attempt ${attempt} failed for ${repo}; refreshing main..."
               # 生成物は毎回作り直せるので、マージせず main を取り直して上書きし直すのが最も確実
               git -C "$d" fetch --depth=1 origin main 2>/dev/null || true
               git -C "$d" reset --hard FETCH_HEAD >/dev/null 2>&1 || true
               cp -a "$stage/${repo}/.ops-sync/." "$d/.ops-sync/" 2>/dev/null || true
+              # cp は**削除を再現しない**。取り直した main には旧名の在庫が居るので消し直す
+              # （スクリプト側の LEGACY_* と同じ名前。旧名がどの consumer にも無くなったら消してよい）。
+              # `.ops-sync/` 丸ごとの同期（rsync --delete 等）にはしない——取り直した main が
+              # 別セッションの更新（sync-manifest.txt 等）を持っていると、それごと巻き戻すため。
+              rm -f "$d/.ops-sync/codex-review-inbox.md" "$d/.ops-sync/codex-review-inbox-all.md"
               sleep "$((attempt * 3))"
             done
             # **1リポジトリの失敗で残りを諦めない**（他の一覧まで古いまま据え置かれる）
             if [ "$pushed" != "1" ]; then
-              echo "::warning::codex-inbox: failed to push ${repo} after retries"
+              echo "::warning::review-inbox: failed to push ${repo} after retries"
               rc=1
             fi
           done < /tmp/slice-repos.txt
@@ -161,7 +171,7 @@ jobs:
         run: |
           set -uo pipefail
           {
-            printf '## Codex review inbox\n\n'
+            printf '## Review inbox\n\n'
             printf -- '- open findings: **%s**（うちマージ済み PR: %s）\n' "${OPEN:-?}" "${MERGED:-?}"
             printf -- '- unreadable repos: %s\n' "${FAILURES:-?}"
             printf -- '- files rewritten: %s\n' "${CHANGED:-?}"
@@ -175,12 +185,12 @@ jobs:
         if: always()
         run: |
           set -uo pipefail
-          mkdir -p codex-review-inbox-out
-          if [ -f logs/ci/scripts/codex-review-inbox.log ]; then
+          mkdir -p review-inbox-out
+          if [ -f logs/ci/scripts/review-inbox.log ]; then
             sed -E \
               -e 's/gh[pousr]_[A-Za-z0-9]{20,}/[REDACTED-SECRET]/g' \
               -e 's/github_pat_[A-Za-z0-9_]{20,}/[REDACTED-SECRET]/g' \
-              logs/ci/scripts/codex-review-inbox.log > codex-review-inbox-out/codex-review-inbox.log
+              logs/ci/scripts/review-inbox.log > review-inbox-out/review-inbox.log
           fi
 
       # dest は信号ごとに分ける（publish-ci-logs は publish 前に dest を rm -rf するため）。
@@ -188,9 +198,9 @@ jobs:
         if: always()
         uses: ./ops-sync/.github/actions/publish-ci-logs
         with:
-          source-dir: codex-review-inbox-out
-          dest: codex-review-inbox
-          commit-message: "ci(codex-review-inbox): open=${{ steps.collect.outputs.open_findings || '?' }}"
+          source-dir: review-inbox-out
+          dest: review-inbox
+          commit-message: "ci(review-inbox): open=${{ steps.collect.outputs.open_findings || '?' }}"
           token: ${{ github.token }}
 
       # ── 一覧に積んだだけで終わらせない ──────────────────────────────────────
@@ -214,7 +224,7 @@ jobs:
           set -u
           waiting=0
           if [ -n "${MERGED:-}" ] && [ "${MERGED}" != "0" ]; then
-            echo "::error::マージ済み PR に未 resolve の Codex 指摘が ${MERGED} 件あります（${MERGED_REPOS:-?}）。配布物への指摘なら全 consumer に欠陥が残っています。一覧: ${INBOX_ALL_PATH} in ${INBOX_ALL_REPO}（private repo は ${SLICE_PATH} にも自分の分がある）"
+            echo "::error::マージ済み PR に未 resolve のレビュー指摘が ${MERGED} 件あります（${MERGED_REPOS:-?}）。配布物への指摘なら全 consumer に欠陥が残っています。一覧: ${INBOX_ALL_PATH} in ${INBOX_ALL_REPO}（private repo は ${SLICE_PATH} にも自分の分がある）"
             waiting=1
           fi
           if [ -n "${FAILURES:-}" ] && [ "${FAILURES}" != "0" ]; then
